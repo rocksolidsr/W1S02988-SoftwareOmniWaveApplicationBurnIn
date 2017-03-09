@@ -1,0 +1,4 @@
+syntax: glob
+DEBUG - FLASH/*
+Debug/*
+Release/*
