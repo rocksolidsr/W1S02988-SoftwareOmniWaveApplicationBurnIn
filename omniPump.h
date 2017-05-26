@@ -1,5 +1,5 @@
 /*('file properties: ', 'resolution ', 116, 'x', 113, 'format ', 'ARGB2', 'stride ', 116, ' total size ', 13108, mod4=13108)*/
-#define RAM_OMNIPUMP 	34356 //omniLogo beginning address in RAM_G and ends at 47464
+#define RAM_OMNIPUMP 	0 //omniLogo beginning address in RAM_G and ends at 13108
 #define OMNIPUMP_HANDLE 1
 #define OMNIPUMP_LINESTRIDE 116
 #define OMNIPUMP_HEIGHT 113

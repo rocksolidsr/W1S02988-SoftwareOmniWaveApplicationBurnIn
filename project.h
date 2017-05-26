@@ -45,10 +45,11 @@ void Recoverable_Error(void);
 unsigned long getTickTime(void);
 void blinkLight(void);
 unsigned char HSWState(void);
-unsigned char doneBeeping(unsigned char shouldBeep, unsigned char reset);
+unsigned char doneBeeping(unsigned char shouldBeep, unsigned char reset, unsigned char alert, unsigned char beeps);
 unsigned char alertBeep(unsigned char shouldBeep, unsigned char reset);
 unsigned char HandSwitch(void);
 void checkPump(void);
+unsigned char handPieceStatus(void);
 
 extern void InitSysCtrl(void);
 extern void InitPieCtrl(void);

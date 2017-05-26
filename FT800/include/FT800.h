@@ -894,6 +894,7 @@ void setup_spi_gpio(void);
 #define OPT_CENTER           1536UL
 #define OPT_CENTERX          512UL
 #define OPT_CENTERY          1024UL
+#define OPT_RIGHT			 3072UL
 #define OPT_FLAT             256UL
 #define OPT_MONO             1UL
 #define OPT_NOBACK           4096UL
@@ -933,6 +934,8 @@ void setup_spi_gpio(void);
 #define WHITE		0xFFFFFFFFUL		// White
 #define BLACK		0xFF000000UL		// Black
 #define YELLOW		0xFFFFD200UL		// Yellow
+#define tWHITE		1
+#define tBLACK		0
 
 
 #endif /* FT800_H_ */

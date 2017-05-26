@@ -39,7 +39,7 @@ void Gpio_select(void)
 	GpioCtrlRegs.GPCMUX1.all = 0;																		// GPIO64 ... GPIO79 = General Purpose I/O
 	GpioCtrlRegs.GPCMUX2.all = 0;																		// GPIO80 ... GPIO87 = General Purpose I/O
 
-	GpioCtrlRegs.GPADIR.all = 1;																		// GPIO0  ... GPIO31 as outputs by default because unused GPIO's are unconnected
+	GpioCtrlRegs.GPADIR.all = 0xFFFFFFFF;																// GPIO0  ... GPIO31 as outputs by default because unused GPIO's are unconnected
 
 	GpioCtrlRegs.GPADIR.bit.GPIO1  = 0;
 	GpioCtrlRegs.GPAPUD.bit.GPIO1 = 0;
@@ -50,22 +50,24 @@ void Gpio_select(void)
 	GpioCtrlRegs.GPADIR.bit.GPIO26 = 1;																	// DSP SYS_ON_2
 	GpioCtrlRegs.GPADIR.bit.GPIO27 = 0;																	// Footswitch
 
-	GpioCtrlRegs.GPBDIR.all = 1;																		// GPIO32 ... GPIO63 as outputs by default because unused GPIO's are unconnected
+	GpioCtrlRegs.GPBDIR.all = 0xFFFFFFFF;																// GPIO32 ... GPIO63 as outputs by default because unused GPIO's are unconnected
 
 	GpioCtrlRegs.GPBDIR.bit.GPIO35 = 1;																	// Set GPIO 35 as output (ANA_OR_DIG_AGC2)
 	GpioCtrlRegs.GPBDIR.bit.GPIO36 = 1;																	// Set GPIO 35 as output (ANA_OR_DIG_FREQ)
 	GpioCtrlRegs.GPBDIR.bit.GPIO37 = 1;																	// Set GPIO 35 as output (ANA_OR_DIG_FREQ2)
+	GpioCtrlRegs.GPBDIR.bit.GPIO40 = 0;																	// Set GPIO 40 as input (PRIME PB)
 
 	GpioCtrlRegs.GPBDIR.bit.GPIO52 = 1;																	// Set GPIO 52 as output (DSP_RESET_PA)
 	GpioCtrlRegs.GPBDIR.bit.GPIO58 = 1;																	// Set GPIO 58 as output F_SEL_1
 	GpioCtrlRegs.GPBDIR.bit.GPIO59 = 1;																	// Set GPIO 59 as output 20KHZ_ON
 
-	GpioCtrlRegs.GPCDIR.all = 1;																		// GPIO64 ... GPIO87 as outputs by default because unused GPIO's are unconnected
+	GpioCtrlRegs.GPCDIR.all = 0xFFFFFFFF;																// GPIO64 ... GPIO87 as outputs by default because unused GPIO's are unconnected
 	GpioCtrlRegs.GPCDIR.bit.GPIO65 = 1;																	// Set GPIO 65 as output V_GAIN
 	GpioCtrlRegs.GPCDIR.bit.GPIO66 = 1;																	// Set GPIO 66 as output I_GAIN
 	GpioCtrlRegs.GPCDIR.bit.GPIO68 = 1;																	// Set GPIO 68 as output (sys_on_3.3)
 	GpioCtrlRegs.GPCDIR.bit.GPIO69 = 1;																	// Set GPIO 68 as output for speaker
 	GpioCtrlRegs.GPCDIR.bit.GPIO70 = 1;																	// Set GPIO 70 as output for hand piece LED
+	GpioCtrlRegs.GPCDIR.bit.GPIO71 = 0;																	// Set GPIO 71 as input for door lid
 	GpioCtrlRegs.GPCDIR.bit.GPIO81 = 0;																	// Footswitch detect
 
 	ULTRASOUND_OFF;																						// PREVENT SYS FROM TURNING ON @ INITIALIZATION
@@ -81,6 +83,7 @@ void Gpio_select(void)
 	DELAY_US(1000);
 	DSP_RESET_PA_L;
 	DELAY_US(1000);
+	HP_LIGHT_OFF;																						// Ensure LED is off to start
 }
 //################################################################################################################################################################################################
 //						End of GPIO Setup
@@ -262,15 +265,16 @@ void Setup_eCAP(void)	//EM_CODE
 	ECap5Regs.ECCTL1.bit.CAP2POL = EC_RISING;															// Capture Event 2 triggered on a rising edge (RE)
 	ECap5Regs.ECCTL1.bit.CAP3POL = EC_RISING;															// Capture Event 3 triggered on a rising edge (RE)
 	ECap5Regs.ECCTL1.bit.CAP4POL = EC_RISING;															// Capture Event 4 triggered on a rising edge (RE)
-	ECap5Regs.ECCTL1.bit.CTRRST1 = EC_ABS_MODE;															// Do not reset counter on Capture Event 1 (absolute time stamp)
-	ECap5Regs.ECCTL1.bit.CTRRST2 = EC_ABS_MODE;															// Do not reset counter on Capture Event 2 (absolute time stamp)
-	ECap5Regs.ECCTL1.bit.CTRRST3 = EC_ABS_MODE;															// Do not reset counter on Capture Event 3 (absolute time stamp)
-	ECap5Regs.ECCTL1.bit.CTRRST4 = EC_ABS_MODE;															// Do not reset counter on Capture Event 4 (absolute time stamp)
+	ECap5Regs.ECCTL1.bit.CTRRST1 = EC_DELTA_MODE;														// TSCTR is reset to 0 after every event
+	ECap5Regs.ECCTL1.bit.CTRRST2 = EC_DELTA_MODE;														// TSCTR is reset to 0 after every event
+	ECap5Regs.ECCTL1.bit.CTRRST3 = EC_DELTA_MODE;														// TSCTR is reset to 0 after every event
+	ECap5Regs.ECCTL1.bit.CTRRST4 = EC_DELTA_MODE;														// TSCTR is reset to 0 after every event
 	ECap5Regs.ECCTL1.bit.CAPLDEN = EC_ENABLE;															// Enable Loading of CAP1-4 registers on a capture event
 	ECap5Regs.ECCTL1.bit.PRESCALE = EC_DIV1;
 	ECap5Regs.ECCTL1.bit.FREE_SOFT = 2;																	// Free Run (continue running when breakpoint is hit)
 
-	ECap5Regs.ECCTL2.bit.CONT_ONESHT = EC_ONESHT;														// Operate in one shot mode
+	ECap5Regs.ECCTL2.bit.CAP_APWM = EC_CAP_MODE;														// Capture Mode
+	ECap5Regs.ECCTL2.bit.CONT_ONESHT = EC_CONTINUOUS;													// Operate in continuous mode
 	ECap5Regs.ECCTL2.bit.SYNCO_SEL = EC_SYNCO_DIS;														// Disable sync out signal
 	ECap5Regs.ECCTL2.bit.SYNCI_EN = EC_DISABLE;															// Disable sync in signal
 	ECap5Regs.ECCTL2.bit.TSCTRSTOP = EC_RUN;															// Counter stop control (free running)

@@ -123,7 +123,6 @@ FT_Status Init(uint8_t ResType, uint8_t rotation)
 #endif
 	SetDisplayEnablePin(FT_GPIO7);
 	Finish();
-	DELAY_US(500000);
 	BacklightOn();
 
 	return FT_OK;

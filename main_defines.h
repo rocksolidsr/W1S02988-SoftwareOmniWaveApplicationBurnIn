@@ -8,7 +8,9 @@
 #ifndef OMNIWAVE_MAIN_DEFINES_H_
 #define OMNIWAVE_MAIN_DEFINES_H_
 
-typedef enum
+//#define DEMO_UI
+
+typedef enum states
 {
 	sNONE,
 	READY_TO_PRIME,
@@ -22,15 +24,17 @@ typedef enum
 	PROCEDURE_DONE_ALERT,
 	PROCEDURE_DONE,
 	RECOVERABLE_ERROR,
-	UNRECOVERABLE_ERROR
+	UNRECOVERABLE_ERROR,
+	CLOSE_PUMP
 } states;
 
-#define APP_VERSION     1       //<! Define version for use in strings
+#define APP_VERSION     2       //<! Define version for use in strings
 #define NONE			0
 #define HSW				handpieceID<250
 #define PRIME_PB		!GpioDataRegs.GPBDAT.bit.GPIO40
 #define FSW				(!GpioDataRegs.GPADAT.bit.GPIO27)
 #define FSW_DETECT		(!GpioDataRegs.GPCDAT.bit.GPIO81)
+#define PUMP_LID_OPEN	GpioDataRegs.GPCDAT.bit.GPIO71
 #define DONT_RESET		0
 #define RESET			1
 #define OFF				0
@@ -48,15 +52,15 @@ typedef enum
 #define CANT_LOCK				8
 #define PHASE_CMD_LOW			9
 #define MASTER_RESTART_ERROR	10
-#define FREQ_ERROR2				11
-#define OVERLOAD_ERROR			12
-#define AGC_ERROR2				13
-#define SYS_SAFETY_ERROR		14
-#define OVER_V					17
-#define OVER_I					18
-#define WATCHDOG_ERROR			19
-#define VOLTS_WHILE_OFF			20
-#define END_OF_PROCEDURE		21
+#define OVERLOAD_ERROR			11
+#define AGC_ERROR2				12
+#define SYS_SAFETY_ERROR		13
+#define OVER_V					14
+#define OVER_I					15
+#define WATCHDOG_ERROR			16
+#define VOLTS_WHILE_OFF			17
+#define INIT_NOT_DONE			18
+#define PUMP_OPEN				19
 
 #define NO_DEVICE		handpieceID>4000
 #define STANDARD_DEVICE handpieceID>2000&&handpieceID<2300
@@ -118,7 +122,6 @@ typedef enum
 #define MIN_PHASE			1000
 #define SYS_ANA_RUN_OK  	0
 #define SYS_RESTART 		1
-#define FREQ_ERROR			2
 #define AGC_FAULT 			3
 #define OVERLOAD_FAULT		4
 #define SYS_OFF				10
@@ -146,5 +149,17 @@ typedef enum
 #define RUN_SPEED			1600
 #define PUMP_OFF			0
 #define PRIME_TIME			50000
+#define FREQ_DELAY_TIME		10
+#define STARTUP				1
+#define USE_TIME			2
+#define NULL				0
+#define ERROR				1
+#define NORMAL				2
+#define UNRECERROR			3
+#define DEBOUNCE_TIME		2000
+#define LOCK_TIME			10000
+#define STARTUP_DELAY		100
+#define NO_US_START			10000
+#define RESTART_DELAY		100
 
 #endif /* OMNIWAVE_MAIN_DEFINES_H_ */

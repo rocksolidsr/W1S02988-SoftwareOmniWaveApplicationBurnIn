@@ -89,6 +89,7 @@ PAGE 0 :
    RAML1      : origin = 0x009000, length = 0x001000
    RAML2      : origin = 0x00A000, length = 0x001000
    RAML3      : origin = 0x00B000, length = 0x001000
+   RAML4      : origin = 0x00C000, length = 0x001000
    ZONE7A     : origin = 0x200000, length = 0x00FC00    /* XINTF zone 7 - program space */
    CSM_RSVD   : origin = 0x33FF80, length = 0x000076     /* Part of FLASHA.  Program with all 0x0000 when CSM is in use. */
    CSM_PWL    : origin = 0x33FFF8, length = 0x000008     /* Part of FLASHA.  CSM password locations in FLASHA            */
@@ -107,7 +108,7 @@ PAGE 1 :
 
    BOOT_RSVD  : origin = 0x000002, length = 0x00004E     /* Part of M0, BOOT rom will use this for stack */
    RAMM1      : origin = 0x000400, length = 0x000400     /* on-chip RAM block M1 */
-   RAML4      : origin = 0x00C000, length = 0x001000
+   //RAML4      : origin = 0x00C000, length = 0x001000
    RAML5      : origin = 0x00D000, length = 0x003000
    //RAML6      : origin = 0x00E000, length = 0x001000
    //RAML7      : origin = 0x00F000, length = 0x001000
@@ -122,13 +123,13 @@ SECTIONS
       re-directs execution to the start of user code.  */
    codestart        : > BEGIN,     PAGE = 0
    ramfuncs         : > RAML0,     PAGE = 0
-   .text:{ *(.text) } >> RAML1 | RAML2 | RAML3 PAGE = 0				//user added code to increase .text size
+   .text:{ *(.text) } >> RAML1 | RAML2 | RAML3 |RAML4 PAGE = 0				//user added code to increase .text size
    .cinit           : > RAML0,     PAGE = 0
    .pinit           : > RAML0,     PAGE = 0
    .switch          : > RAML0,     PAGE = 0
 
    .stack           : > RAMM1,     PAGE = 1
-   .ebss            : > RAML4,     PAGE = 1
+   .ebss            : > RAML4,     PAGE = 0
    .econst          : > RAML5,     PAGE = 1
    .esysmem         : > RAMM1,     PAGE = 1
 
@@ -153,7 +154,7 @@ SECTIONS
 
    FPUmathTables    : > FPUTABLES, PAGE = 0, TYPE = NOLOAD
 
-   DMARAML4         : > RAML4,     PAGE = 1
+   DMARAML4         : > RAML4,     PAGE = 0
    DMARAML5         : > RAML5,     PAGE = 1
    //DMARAML6         : > RAML6,     PAGE = 1
    //DMARAML7         : > RAML7,     PAGE = 1

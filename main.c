@@ -9,10 +9,11 @@
 // =====|============|======|===============================================
 //  01  | 03 09 2017 | S.R. | 1st Software release - Used W1S02988 - revision 02XA as a start
 //							  30 minutes for ultrasound, and 15 minutes of rest
+//  02 	| 05 26 2017 | S.R. | Updated based on version 02XK of W1S02915
 //################################################################################################################################################################################################
 #include "math.h"
 #include "project.h"
-
+const char software[40] = "W1S02988 - Rev 02";
 
 //################################################################################################################################################################################################
 //						Global Variables
@@ -34,16 +35,12 @@ unsigned int pll_on;																					// Tells system that PLL is engaged (an
 unsigned int lock;																						// Used to inform system that analog PLL control is locked
 unsigned int ana_agc_on;																				// Tells system that analog AGC is engaged.
 unsigned int sys_on;																					// From main loop to timer0 tells timer0 that user is commanding ultrasound
-long unsigned int overload_ctr;																			// Determines that system is loaded beyond system power capability or feedback on AGC is faulty
-unsigned int start_ctr;																					// Used for AGC error and overload not to start during start transient
+long unsigned int overload_ctr=0;																		// Determines that system is loaded beyond system power capability or feedback on AGC is faulty
 unsigned int capture_ctr;																				// Used to detect initial capture - need N OK events
-unsigned int restart_timer;																				// Controls program flow during re-start
 unsigned int restart_ctr;																				// Number of restarts before foot off pedal required
 unsigned int new_ad_vals;																				// A semaphore to coordinate with routines that use A/D vals to make sure each iteration uses new vals
 unsigned int sys_watchword;																				// Bits are set by each critical routine that must execute under system state for watchdog to determine proper function
 unsigned int sys_watchdog_ctr;																			// Counts before above mentioned bits not being set indicate system malfunction
-unsigned int r1_val;																					// PLL variable R control param
-unsigned int r2_val;																					// PLL variable R control param
 long unsigned int sys_safety_ctr;																		// If system re-start takes too long, issues a fault
 unsigned int sample_window[SAMPLE_WINDOW_VALS];															// Window used in ANA_RUNNING_AND_LOCKED function
 unsigned int sample_window_2[SAMPLE_WINDOW_VALS];														// Window used in AGC_SOFT_D_TO_A function
@@ -52,37 +49,34 @@ unsigned int pot_val;																					// Co function variable for adjusting 
 unsigned int co_on, co_done;																			// Semaphore used to indicate I motional adjust active so other routines do not interfere
 unsigned int debounce_ctr;																				// Used for debounce
 unsigned int xmt_test_val;
-unsigned int restarted, no_restart_ctr, lost_lock;
-unsigned int vco_in_last, vco_adj_done, vco_freq_ctr,vco_ctr;											// Used for bringing system into digital mode
-unsigned int vco_in_last_array[1000], vco_in_last_ctr, vco_in_last_position;
+unsigned int no_restart_ctr, lost_lock;
+
 unsigned int agc_delay_ctr, agc_fault_ctr;																// Used for when turning on AGC before locking
 unsigned int agc_ramp_down_enabled, agc_ramp_down_delay;												// Used for AGC ramp down
-unsigned int window_val;
-long unsigned int high_limit, low_limit;
-unsigned int high_window_adj, low_window_adj, low_window_init, high_window_init, window_start_ctr;		// Used for setting the PLL window
-unsigned int window_delay;
+unsigned int low_calibration_complete=0, high_calibration_complete=0;
+unsigned int cal_freq_timer=0, freq_delay=0;
 unsigned int START_PHASE;
 unsigned int sys_stable, Stable_Ctr;
-long unsigned int pll_ctr;
 long unsigned int Sys_Monitor_Ctr;
 unsigned int agc_duty_position;
 unsigned int turnoff_delay=0;
 float pf, time_delay, frequency, pf_adj, pf_moving_average, alpha=.001;
 signed long phase, old_phase;
 unsigned int mm=0,ss=0, timer=0, ms=0;
-unsigned int button_timer, mode=0;																		// Used for controlling different button modes
-unsigned int hsw_debounce, xducer_detect_debounce, debounce_ctr;										// Used for debounce
+unsigned char mode=0;																					// Used for controlling different button modes
 unsigned int agc_ctr=0, AGC_TIME=1, hardwareFaultCtr=0;
-unsigned long tickTime=0, remainingTime=0, primeTimer=0,primeButtonTimer=0;
+unsigned long tickTime=0, remainingTime=0, primeTimer=0,primeButtonTimer=0,restartedTime=0;
 unsigned char energyOn=0;
 unsigned int dispTimer=0;
+unsigned int handpieceDisconDebounce=0, handpieceConDebounce=0;
+unsigned int lockCtr=0,vcoInLowCtr=0;
 
 //Pump variables
 unsigned int pumpRPM;
 unsigned char newPumpValue=0;
 double pulseFreq;
 
-//Transducer Settings
+//Default Transducer Settings
 unsigned int AGC_HIGH=300;																				// Sets the upper portion of the pulsed AGC command
 unsigned int AGC_LOW=10;
 long HIGH_FREQ = 40500;
@@ -93,13 +87,13 @@ unsigned int 	DEFAULT_AGC=200;
 unsigned int 	duty=100;																				// 0=100% duty cycle
 unsigned int 	STABLE_COUNTER = 10;
 unsigned int 	START_CMD=10;
-states state=sNONE, previousState=sNONE;
-unsigned int runTime=1800, buttonState=0;
+states state=READY_TO_PRIME, previousState=sNONE;
+unsigned int runTime=1800, useTime=0, buttonState=0;
 
 //Display Global Variables
+FT_GEStatus displayStatus=FT_GE_OK;
+FT_Status initStatus=FT_OK;
 extern unsigned int hsize, vsize;
-
-//unsigned int pumpSpeed=0, pumpTimer=0;
 
 #ifndef DEBUG
 // Do not remove code below used to put program on flash of DSP
@@ -114,7 +108,6 @@ extern unsigned int RamfuncsRunStart;
 //################################################################################################################################################################################################
 void main(void)
 {
-	unsigned int i;
 	InitSysCtrl();	 																					// Basic Core Initialization
 	EALLOW;
 	SysCtrlRegs.WDCR = 0x0068;				 															// 0x00AF = Enable Watchdog 0x0068 = Disable Watchdog
@@ -129,7 +122,7 @@ void main(void)
 #endif
 
 	ana_run_status=SYS_OFF;																				// Set initial values
-	sys_fail=NONE;
+	sys_fail=INIT_NOT_DONE;
 	sys_watchdog_ctr=0;
 	sys_watchword=0;
 	volts_val=0;
@@ -139,20 +132,10 @@ void main(void)
 	co_done=0;
 	co_on=0;
 	pll_on=0;
-	vco_adj_done = 0, vco_freq_ctr = 0,	vco_ctr = 0, vco_in_last=0, vco_in_last_ctr=0;
-	for(i=0;i<1000;i++)
-		vco_in_last_array[i]=0;
-	agc_fault_ctr = 0, window_delay = 0, no_restart_ctr = 0;
+	agc_fault_ctr = 0, no_restart_ctr = 0;
 	lost_lock = 0;
-	r1_val = R1_INIT_VAL;																				// Setup the frequency window of the PLL (4046) chip
-	r2_val = R2_INIT_VAL;
 	START_PHASE=START_PHASE_INIT;
-	low_window_init = 1;
-	high_window_init = 1;
 	ultrasound_on_off(ULTRA_OFF);																		// Make sure ultra sound is off
-	low_window_adj = 1;
-	high_window_adj = 0;
-	pll_ctr = 0;
 	agc_duty_position = 10000/MOD_FREQ;
 
 	Gpio_select();																						// Setup GPIO's
@@ -194,15 +177,105 @@ void main(void)
 	loadImages();
 	DisplayOn();
 	Finish();
-	loadFont();
 
-	state=READY_TO_PRIME;
+	unsigned char beepReset=0;
+	unsigned long barColor=BAR_COLOR2;
 
 	EnableDog();
+
+#ifdef DEMO_UI
+	unsigned char ended=0;
+	DisableDog();
+	while(1)
+	{
+		ServiceDog1();
+		if(ended==0)
+			barColor=BAR_COLOR;
+		else
+			barColor=BAR_COLOR2;
+		if(ended<2)
+			runningScreen(runTime,1800,NORMAL,energyOn,barColor,tWHITE);
+		if(CpuTimer0.InterruptCount>1&&runTime>0&&ended<2)
+		{
+			if(runTime<120)
+				runTime--;
+			else
+				runTime-=10;
+			CpuTimer0.InterruptCount=0;
+		}
+		if(runTime==0)
+		{
+			ended++;
+			runTime=1800;
+		}
+		if(ended==2)
+		{
+			runningScreen(900,1800,NORMAL,energyOn,BAR_COLOR,tWHITE);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended++;
+			}
+		}
+		if(ended==3)
+		{
+			runningScreen(900,1800,NORMAL,energyOn,BAR_COLOR2,tWHITE);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended++;
+			}
+		}
+		if(ended==4)
+		{
+			runningScreen(900,1800,ERROR,energyOn,barColor,tWHITE);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended++;
+			}
+		}
+		if(ended==5)
+		{
+			runningScreen(60,1800,ERROR,energyOn,barColor,tWHITE);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended++;
+			}
+		}
+		if(ended==6)
+		{
+			runningScreen(900,1800,UNRECERROR,energyOn,barColor,tWHITE);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended++;
+			}
+		}
+		if(ended==7)
+		{
+			runningScreen(60,1800,UNRECERROR,energyOn,barColor,tWHITE);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended++;
+			}
+		}
+		if(ended==8)
+		{
+			runningScreen(60,1800,NORMAL,energyOn,barColor,tBLACK);
+			if(PRIME_PB)
+			{
+				DELAY_US(200000);
+				ended=0;
+			}
+		}
+	}
+#endif
 	while(1)																							// Main program (keep looping)
 	{    
 		ServiceDog1();
-		GpioDataRegs.GPATOGGLE.bit.GPIO7=1;
 		if (SysCtrlRegs.PLLSTS.bit.MCLKSTS != 0)														// Detects missing clock and issues failure if sys goes into limp mode.
 		{
 			ultrasound_on_off(ULTRA_OFF);
@@ -210,222 +283,327 @@ void main(void)
 			Unrecoverable_Error();
 		}
 		sys_watchword|=0x00F0;																			// Watchdog identifier for main while loop
-		switch(state)																					// State machine for user interface
+		displayStatus=Finish();
+		if(displayStatus>FT_GE_FINISHED||initStatus>FT_OK)
 		{
-			case READY_TO_PRIME:
-				displayReadyToPrime();
-				if(PRIME_PB)
-				{
-					primeButtonTimer=getTickTime();
-					displayPriming();
-					state=PRIMING;
-					primeTimer = getTickTime();
-					PUMP_SPEED = PRIME_SPEED;
-				}
-				break;
-			case PRIMING:
-				if(getTickTime()-primeButtonTimer>2000&&PRIME_PB)										// If still holding button after 2 sec. activate momentary prime button
-					state = MOMENTARY_PRIMING;
-				else if(getTickTime()-primeButtonTimer>2000&&!PRIME_PB)									// If not holding button after 2 sec. activate latched auto timed prime
-					state = LATCHED_PRIMING;
-				break;
-			case MOMENTARY_PRIMING:
-				displayPriming();
-				if(!PRIME_PB)
-				{
-					if(previousState==RUN)
-						state=RUN,primeButtonTimer=getTickTime(),PUMP_SPEED = PUMP_OFF;					// If done priming and previous state is RUN return to state RUN
-					else
-						state=DETECT_DEVICE,primeButtonTimer=getTickTime(),PUMP_SPEED = PUMP_OFF;		// If done priming and previous state is not RUN goto detect device
-				}
-				break;
-			case LATCHED_PRIMING:
-				displayPriming();
-				if(PRIME_PB)
-					state=DETECT_DEVICE,primeButtonTimer=getTickTime(), PUMP_SPEED = PUMP_OFF;			// If ending latched priming early, go to detect device
-				else if(getTickTime()-primeTimer>PRIME_TIME-remainingTime)								// Run latched prime for desired time, if error occurs remainingTime will have a value and adjust accordingly
-				{
-					state=DETECT_DEVICE;
-					PUMP_SPEED = PUMP_OFF;
-				}
-				break;
-			case DETECT_DEVICE:
-				PUMP_SPEED = PUMP_OFF;																	// Make sure pump is off
-				if(STANDARD_DEVICE)																		// Load settings
-				{
-					HIGH_FREQ = 41000;
-					LOW_FREQ = 39000;
-					AGC_HIGH=1925;
-					AGC_LOW=10;
-					MOD_FREQ = 10;
-					duty=85;
-					vco_in_last=0;
-					START_PHASE=2000;
-					state=RUN;
-				}
-				else
-				{
-					displayConnectDevice();
-				}
-				if(PRIME_PB&&getTickTime()-primeButtonTimer>200)										// Allow priming device when no device is connected yet, 200ms debounce
-				{
-					previousState=state;
-					PUMP_SPEED=PRIME_SPEED;
-					state=MOMENTARY_PRIMING;
-				}
-				break;
-			case RUN:
-				//*********************************************************Transducer Connected**********************************************************************************
-				if(low_window_init&&high_window_init&&!(NO_DEVICE))										// Only allow system to run it transducer is connected and debounce count is less than 1000 and setup of the window is close.
-				{
-					//***********************************************************Button Pressed***********************************************************************************
-					if(HSWState()&&!sys_fail&&state!=DELAY)																	// Test if user is commanding US
+			DisableDog();
+			displayStatus=FT_GE_OK;
+			Reset();
+			if((initStatus=Init(FT_DISPLAY_WQVGA_480x272, FT_DISPLAY_0))==FT_OK)
+				loadImages();
+			EnableDog();
+			BacklightOn();
+		}
+		else
+		{
+			switch(state)																					// State machine for user interface
+			{
+				case READY_TO_PRIME:
+					displayReadyToPrime();
+					if(PRIME_PB&&!PUMP_LID_OPEN)
 					{
-						PUMP_SPEED = RUN_SPEED;
-						HP_LIGHT_ON;
-						if(debounce_ctr>10000)
+						primeButtonTimer=getTickTime();
+						displayPriming();
+						state=PRIMING;
+						primeTimer = getTickTime();
+						PUMP_SPEED = PRIME_SPEED;
+					}
+					if(PRIME_PB&&PUMP_LID_OPEN)
+					{
+						displayClosePumpLid();
+						previousState=state;
+						state=CLOSE_PUMP;
+					}
+					break;
+				case PRIMING:
+					HP_LIGHT_OFF;
+					if(getTickTime()-primeButtonTimer>1000&&PRIME_PB)										// If still holding button after 1 sec. activate momentary prime button
+						state = MOMENTARY_PRIMING;
+					else if(getTickTime()-primeButtonTimer>200&&!PRIME_PB)									// If not holding button after 200 ms activate latched auto timed prime
+						state = LATCHED_PRIMING;
+					if(PUMP_LID_OPEN)
+					{
+						displayClosePumpLid();
+						remainingTime=(getTickTime()-primeTimer);
+						previousState=READY_TO_PRIME;
+						state=CLOSE_PUMP;
+					}
+					break;
+				case MOMENTARY_PRIMING:
+					HP_LIGHT_OFF;
+					displayPriming();
+					if(!PRIME_PB)
+					{
+						if(previousState==RUN)
+							state=RUN,primeButtonTimer=getTickTime(),PUMP_SPEED = PUMP_OFF;					// If done priming and previous state is RUN return to state RUN
+						else if(!sys_fail)
+							state=DETECT_DEVICE,primeButtonTimer=getTickTime(),PUMP_SPEED = PUMP_OFF;		// If done priming and previous state is not RUN goto detect device
+					}
+					if(PUMP_LID_OPEN)
+					{
+						displayClosePumpLid();
+						previousState=READY_TO_PRIME;
+						state=CLOSE_PUMP;
+					}
+					break;
+				case LATCHED_PRIMING:
+					displayPriming();
+					if(PRIME_PB)
+						state=DETECT_DEVICE,primeButtonTimer=getTickTime(), PUMP_SPEED = PUMP_OFF;			// If ending latched priming early, go to detect device
+					else if(getTickTime()-primeTimer>PRIME_TIME-remainingTime)								// Run latched prime for desired time, if error occurs remainingTime will have a value and adjust accordingly
+					{
+						state=DETECT_DEVICE;
+						PUMP_SPEED = PUMP_OFF;
+					}
+					if(PUMP_LID_OPEN)
+					{
+						displayClosePumpLid();
+						remainingTime=(getTickTime()-primeTimer);
+						previousState=state;
+						state=CLOSE_PUMP;
+					}
+					break;
+				case DETECT_DEVICE:
+					PUMP_SPEED = PUMP_OFF;																	// Make sure pump is off
+					if(!sys_fail)
+						mode=0;																				// Only reset button state if no errors
+					if(STANDARD_DEVICE)																		// Load settings
+					{
+						HIGH_FREQ = 41500;
+						LOW_FREQ = 39500;
+						AGC_HIGH=1900;
+						AGC_LOW=10;
+						MOD_FREQ = 10;
+						duty=85;
+						START_PHASE=2000;
+						if(sys_fail!=WATCHDOG_ERROR&&sys_fail!=VOLTS_WHILE_OFF)
+							sys_fail=INIT_NOT_DONE;
+						low_calibration_complete=0;
+						high_calibration_complete=0;
+						runTime=1800;
+						useTime=runTime;
+						state=RUN;
+					}
+					else
+					{
+						displayConnectDevice();
+					}
+					if(PRIME_PB&&getTickTime()-primeButtonTimer>200)										// Allow priming device when no device is connected yet, 200ms debounce from the previous state
+					{
+						previousState=state;
+						PUMP_SPEED=PRIME_SPEED;
+						state=MOMENTARY_PRIMING;
+					}
+					break;
+				case RUN:
+					//*********************************************************Transducer Connected**********************************************************************************
+					if(handPieceStatus())																				// Only allow system to run it transducer is connected and debounce count is less than 1000.
+					{
+						//***********************************************************Button Pressed***********************************************************************************
+						if(HSWState()&&!sys_fail&&state!=DELAY)														// Test if user is commanding US
 						{
-							if((!co_done)&&(ana_run_status!=SYS_RESTART)&&!sys_fail)// Run Co Adjust, after beeping is done
+							PUMP_SPEED = RUN_SPEED;
+							HP_LIGHT_ON;
+							if(debounce_ctr>10000)
 							{
-								energyOn=1;
-								co_on=1;																		// Do not do anything other than Co
-								if(Cal_I_mot())																	// Co turns on US and nobody else should touch it
+								if((!co_done)&&(ana_run_status!=SYS_RESTART)&&!sys_fail)							// Run Co Adjust, after beeping is done
 								{
-									sys_on=1;																	// Tell Timer0 to run US normally
-									co_on=0;
+									energyOn=1;
+									co_on=1;																		// Do not do anything other than Co
+									if(Cal_I_mot())																	// Co turns on US and nobody else should touch it
+									{
+										sys_on=1;																	// Tell Timer0 to run US normally
+										co_on=0;
+									}
+									else
+									{
+										ultrasound_on_off(ULTRA_OFF);
+										sys_fail=C0_ERROR;
+										Recoverable_Error();														// If Co did not succeed - do not run.
+									}
 								}
-								else
+								if(runTime<=120&&energyOn)
 								{
-									ultrasound_on_off(ULTRA_OFF);
-									sys_fail=C0_ERROR;
-									Recoverable_Error();														// If Co did not succeed - do not run.
+									if(runTime==120&&!beepReset)
+										doneBeeping(OFF,RESET, NULL, NULL), beepReset=1;
+									doneBeeping(ON,DONT_RESET,USE_TIME,2);
 								}
 							}
 						}
-					}
-					//***********************************************************End Button Pressed******************************************************************************
+						//***********************************************************End Button Pressed******************************************************************************
 
-					//******************************************************************* No Button Pressed**********************************************************************
-					else
-					{
-						if(sys_fail==NONE)
-							doneBeeping(OFF,RESET);														// Reset the beeper so next start of ultrasound, it will cause a beep 3 times
-						PUMP_SPEED = PUMP_OFF;
-						blinkLight();
-						debounce_ctr=0;
-						ultrasound_on_off(ULTRA_OFF);
-						sys_on=0;
-						co_on=0;
-						energyOn=0;
-						ana_run_status=SYS_OFF;
-						restart_ctr=0;
-						restart_timer=0;
-						restarted=0;
-						lost_lock=0;
-						Sys_Monitor_Ctr=0;
-						no_restart_ctr=0;
-						if (pot_val != START_POT_VAL)													// Make sure pot_val is back to beginning
+						//******************************************************************* No Button Pressed**********************************************************************
+						else
 						{
-							pot_val = START_POT_VAL;
-							xmt_test_val=spi_xmit(0x1802);
-							if(xmt_test_val!=XMT_OK)
-								sys_fail=DIG_POT_ERROR,Recoverable_Error();
-							xmt_test_val=spi_xmit(pot_val);
-							if(xmt_test_val!=XMT_OK)
-								sys_fail=DIG_POT_ERROR,Recoverable_Error();
+							if(sys_fail==NONE)
+								doneBeeping(OFF,RESET,NULL,NULL);											// Reset the beeper so next start of ultrasound, it will cause a beep 3 times
+							PUMP_SPEED = PUMP_OFF;
+							if(!sys_fail)
+								blinkLight();
+							debounce_ctr=0;
+							ultrasound_on_off(ULTRA_OFF);
+							sys_on=0;
+							co_on=0;
+							energyOn=0;
+							ana_run_status=SYS_OFF;
+							restart_ctr=0;
+							lost_lock=0;
+							Sys_Monitor_Ctr=0;
+							no_restart_ctr=0;
+							lockCtr=0;
+							if (pot_val != START_POT_VAL)													// Make sure pot_val is back to beginning
+							{
+								pot_val = START_POT_VAL;
+								xmt_test_val=spi_xmit(0x1802);
+								if(xmt_test_val!=XMT_OK)
+									sys_fail=DIG_POT_ERROR,Recoverable_Error();
+								xmt_test_val=spi_xmit(pot_val);
+								if(xmt_test_val!=XMT_OK)
+									sys_fail=DIG_POT_ERROR,Recoverable_Error();
+							}
 						}
 					}
-				}
-				else if(!sys_fail)																		// If no device return to detect device state
-				{
-					state=DETECT_DEVICE;
-				}
-				if(sys_fail==NONE)																		// As long as there is no failure display remaining time and energy on
-					time(runTime,energyOn);
-				else if(sys_fail!=0&&sys_fail<19)														// Play alert beep if there is a recoverable error
-				{
-					PUMP_SPEED=PUMP_OFF;
-					if(alertBeep(ON,DONT_RESET))														// Wait for alertBeep to finish before switching states
+					else if(!sys_fail)																		// If no device return to detect device state
 					{
-						buttonState=(HandSwitch()||FSW);
-						state=RECOVERABLE_ERROR;
+						mode=0;
+						BEEPER_OFF;
+						ultrasound_on_off(ULTRA_OFF);
+						state=DETECT_DEVICE;
 					}
-						displayRecoverableError();
-				}
-				else if(sys_fail==19||sys_fail==20)
-				{
-					if(alertBeep(ON,DONT_RESET)){state=UNRECOVERABLE_ERROR;}
+					if(PUMP_LID_OPEN)
+						sys_fail=PUMP_OPEN;
+					if(sys_fail==NONE)																		// As long as there is no failure display remaining time and energy on
+						runningScreen(runTime,useTime,NORMAL,energyOn,barColor,tWHITE);
+					else if(sys_fail&&!handPieceStatus())
+					{
+						ultrasound_on_off(ULTRA_OFF);
+						BEEPER_OFF;
+						state=DETECT_DEVICE;
+					}
+					else if(sys_fail!=NONE&&sys_fail<=OVER_I)												// Play alert beep if there is a recoverable error
+					{
+						PUMP_SPEED=PUMP_OFF;
+						HP_LIGHT_OFF;
+						if(alertBeep(ON,DONT_RESET))														// Wait for alertBeep to finish before switching states
+						{
+							buttonState=(HandSwitch()||FSW);
+							if((!(previousState==LATCHED_PRIMING||previousState==MOMENTARY_PRIMING))||useTime)
+								previousState=state;
+							else
+								previousState=READY_TO_PRIME;
+							state=RECOVERABLE_ERROR;
+						}
+						runningScreen(runTime,useTime,ERROR,energyOn,barColor,tWHITE);
+					}
+					else if(sys_fail==INIT_NOT_DONE)
+					{
+						DLStart();
+						Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Device Initializing");
+						DLEnd();
+						Finish();
+					}
+					else if(sys_fail==WATCHDOG_ERROR||sys_fail==VOLTS_WHILE_OFF)
+					{
+						HP_LIGHT_OFF;
+						PUMP_SPEED=PUMP_OFF;
+						if(alertBeep(ON,DONT_RESET)){state=UNRECOVERABLE_ERROR;}
+						runningScreen(runTime,useTime,UNRECERROR,energyOn,barColor,tWHITE);
+					}
+					else if(sys_fail==PUMP_OPEN)
+					{
+						mode=0;
+						displayClosePumpLid();
+						previousState=state;
+						state=CLOSE_PUMP;
+					}
+					//******************************************************************* End No Button Pressed**********************************************************************
+					if(PRIME_PB&&getTickTime()-primeButtonTimer>200&&!energyOn&&!sys_fail)					// Momentary priming
+					{
+						previousState=state;
+						state=MOMENTARY_PRIMING;
+						PUMP_SPEED = PRIME_SPEED;
+					}
+					break;
+				case DELAY:
+					runningScreen(runTime,useTime,NORMAL,energyOn,barColor,tWHITE);
+					break;
+				case USE_FOOTSWITCH:																	// Tells user to use footswitch if connected and trying to use handswitch
+					PUMP_SPEED = PUMP_OFF;
 					DLStart();
-					Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Unrecoverable Error");
-					Cmd_Text(hsize/2,vsize/2+40, 25, OPT_CENTER,"Restart Console");
+					Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Press footswitch to activate");
 					DLEnd();
 					Finish();
-				}
-				//******************************************************************* End No Button Pressed**********************************************************************
-				if(PRIME_PB&&getTickTime()-primeButtonTimer>200&&!energyOn&&!sys_fail)					// Momentary priming
-				{
-					previousState=state;
-					state=MOMENTARY_PRIMING;
-					PUMP_SPEED = PRIME_SPEED;
-				}
-				break;
-			case DELAY:
-				time(runTime,energyOn);
-				break;
-			case USE_FOOTSWITCH:																	// Tells user to use footswitch if connected and trying to use handswitch
-				PUMP_SPEED = PUMP_OFF;
-				DLStart();
-				Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Press footswitch to activate");
-				DLEnd();
-				Finish();
-				HandSwitch();
-				if(FSW)
-					state=RUN;
-				break;
-			case PROCEDURE_DONE_ALERT:																// State when procedure is done and the alert sound still needs to occur
-				if(alertBeep(ON,DONT_RESET)){state=PROCEDURE_DONE;}
-				DLStart();
-				Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Recommended Use");
-				Cmd_Text(hsize/2,vsize/2+40, 25, OPT_CENTER,"Time Expired");
-				DLEnd();
-				Finish();
-				break;
-			case PROCEDURE_DONE:																	// Procedure done state, cannot leave this state
-				PUMP_SPEED = PUMP_OFF;
-				ultrasound_on_off(ULTRA_OFF);
-				runTime=900;
-				state=DELAY;
-				break;
-			case RECOVERABLE_ERROR:																	// State to handle recoverable errors and reset them
-				PUMP_SPEED = PUMP_OFF;
-				ultrasound_on_off(ULTRA_OFF);
-				if(SHOW_ENG)
-					displayRecoverableError();
-				if(buttonState!=(HandSwitch()||FSW))
-				{
-					co_done=0;
-					DSP_RESET_PA_L;																	// Make sure SR latch is reset and ready to operate, incase hardware fault occurred
-					DELAY_US(1000);
-					DSP_RESET_PA_H;
-					DELAY_US(1000);
-					DSP_RESET_PA_L;
-					DELAY_US(1000);
-					alertBeep(OFF,RESET);
-					mode=0;																			// Reset mode used for double click
-					sys_fail=NONE;
-					if(previousState==LATCHED_PRIMING&&remainingTime<PRIME_TIME)
-						state=READY_TO_PRIME;
-					else
+					HandSwitch();																		// Resets handswitch state
+					if((NO_DEVICE))
+					{
 						state=DETECT_DEVICE;
-					DELAY_US(100000);																// Button debounce
-				}
-				break;
-			case UNRECOVERABLE_ERROR:																// If unrecoverable error, stay at this state infinitely
-				PUMP_SPEED = PUMP_OFF;
-				ultrasound_on_off(ULTRA_OFF);
-				break;
-			default:
-				break;
+					}
+					if(!FSW_DETECT)
+						state=previousState;
+					if(FSW)
+						state=RUN;
+					break;
+				case PROCEDURE_DONE_ALERT:																// State when procedure is done and the alert sound still needs to occur
+					PUMP_SPEED = PUMP_OFF;
+					ultrasound_on_off(ULTRA_OFF);
+					if(alertBeep(ON,DONT_RESET)){state=PROCEDURE_DONE;}
+					DLStart();
+					Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Device Use");
+					Cmd_Text(hsize/2,vsize/2+40, 25, OPT_CENTER,"Time Expired");
+					DLEnd();
+					Finish();
+					break;
+				case PROCEDURE_DONE:																	// Procedure done state, cannot leave this state
+					PUMP_SPEED = PUMP_OFF;
+					ultrasound_on_off(ULTRA_OFF);
+					runTime=900;
+					state=DELAY;
+					break;
+				case RECOVERABLE_ERROR:																	// State to handle recoverable errors and reset them
+					PUMP_SPEED = PUMP_OFF;
+					ultrasound_on_off(ULTRA_OFF);
+					runningScreen(runTime,useTime,ERROR,energyOn,barColor,tWHITE);
+					if(buttonState!=(HandSwitch()||FSW))
+					{
+						co_done=0;
+						DSP_RESET_PA_L;																	// Make sure SR latch is reset and ready to operate, incase hardware fault occurred
+						DELAY_US(1000);
+						DSP_RESET_PA_H;
+						DELAY_US(1000);
+						DSP_RESET_PA_L;
+						DELAY_US(1000);
+						alertBeep(OFF,RESET);
+						if(sys_fail==PUMP_ERROR)
+							mode=2;
+						if(sys_fail==PUMP_ERROR&&previousState==MOMENTARY_PRIMING)
+							state=READY_TO_PRIME;
+						else if(previousState==LATCHED_PRIMING&&remainingTime<PRIME_TIME)
+							state=READY_TO_PRIME;
+						else
+							state=previousState;
+						sys_fail=NONE;
+						DELAY_US(100000);																// Button debounce
+					}
+					break;
+				case UNRECOVERABLE_ERROR:																// If unrecoverable error, stay at this state infinitely
+					PUMP_SPEED = PUMP_OFF;
+					ultrasound_on_off(ULTRA_OFF);
+					runningScreen(runTime,useTime,UNRECERROR,energyOn,barColor,tWHITE);
+					break;
+				case CLOSE_PUMP:
+					PUMP_SPEED = PUMP_OFF;
+					displayClosePumpLid();
+					if(!PUMP_LID_OPEN)
+					{
+						if(previousState==LATCHED_PRIMING&&remainingTime<PRIME_TIME)
+							state=READY_TO_PRIME;
+						else
+							state=previousState;
+					}
+					break;
+				default:
+					break;
+			}
 		}
 	}
 } 
@@ -456,17 +634,24 @@ void cpu_timer0_isr()
 	static unsigned int msTimer=0;
 	unsigned int sys_integrity;
 
+	if(handpieceDisconDebounce<=DEBOUNCE_TIME)
+		handpieceDisconDebounce++;
+	if(handpieceConDebounce<=DEBOUNCE_TIME)
+		handpieceConDebounce++;
 	if(SHOW_ENG)
 		dispTimer++;
 
 	ServiceDog2();
 	CpuTimer0.InterruptCount++;																			// Increment global interrupt counter
+	if(freq_delay<=FREQ_DELAY_TIME)
+		freq_delay++;
+	cal_freq_timer++;
 	msTimer++;
 	if(msTimer>9)
 		tickTime++,msTimer=0;
 	agc_ctr++;																							// Counter for increasing to final AGC command during turn on
 
-	if((energyOn&&!sys_fail)||state==DELAY)																				// Timer stuff
+	if((energyOn&&!sys_fail)||state==DELAY)																// Timer stuff
 	{
 		timer++;
 		if(timer>9)
@@ -478,7 +663,8 @@ void cpu_timer0_isr()
 		{
 			ms=0;
 			ss++;
-			runTime--;
+			if(runTime>0)
+				runTime--;
 			if(runTime<=0)
 			{
 				if(state==DELAY)
@@ -487,27 +673,23 @@ void cpu_timer0_isr()
 					state=RUN;
 				}
 				else
+				{
+					energyOn=0;
+					sys_on=0;
+					co_done=0;
 					state=PROCEDURE_DONE;
+				}
 			}
 		}
 	}
 
 	//******************************************************Debounce for functions in main while(1) loop*****************************************************************
-	if (xducer_detect_debounce<501)
-		xducer_detect_debounce++;																		// Xducer detect debounce
-	if (hsw_debounce<HSW_DEBOUNCE_CTR+2)																// Debounce handswitch
-		hsw_debounce++;
-	if (button_timer<10002)																				// Only increment button_timer to 10000 don't let it loop around back to 0
-	{
-		if (mode >= 1 && mode <=3)
-			button_timer++;
-	}
-	if(debounce_ctr<10002)																	// Co Adjust Debounce to only allow Co Adj once
+	if(debounce_ctr<10002)																				// Co Adjust Debounce to only allow Co Adj once
 		debounce_ctr++;
 	//******************************************************End Debounce for functions in main while(1) loop*************************************************************
 
 	//**************************************************************************AGC Modulation***************************************************************************
-	if (sys_stable&&lock||(vco_adj_done))
+	if (sys_stable&&lock)
 	{
 		if (agc_duty_position>((10000/MOD_FREQ)*0.01*(100-duty)))
 		{
@@ -526,7 +708,7 @@ void cpu_timer0_isr()
 	//************************************************************************End AGC Modulation*************************************************************************
 
 	//*********************************************************Hardware Safety Circuit Fault Detection*******************************************************************
-	if ((TWENTY_AMP_OFF || FIVE_AMP_OFF ||OVERVOLTS_OFF || AGC_AMP_OFF) && low_window_init && high_window_init)
+	if ((TWENTY_AMP_OFF || FIVE_AMP_OFF ||OVERVOLTS_OFF || AGC_AMP_OFF) && sys_fail!=INIT_NOT_DONE)
 	{
 		if(hardwareFaultCtr>100)																		// Make sure hardware fault is real (10ms)
 		{
@@ -558,7 +740,7 @@ void cpu_timer0_isr()
 			{
 				ultrasound_on_off(ULTRA_OFF);
 				sys_fail=OVER_V;
-				Unrecoverable_Error();
+				Recoverable_Error();
 			}
 
 		}
@@ -571,7 +753,7 @@ void cpu_timer0_isr()
 			{
 				ultrasound_on_off(ULTRA_OFF);
 				sys_fail=OVER_I;
-				Unrecoverable_Error();
+				Recoverable_Error();
 			}
 
 		}
@@ -592,7 +774,7 @@ void cpu_timer0_isr()
 	//*********************************************************************End ADC Update********************************************************************************
 
 	//*********************************************************************Capture Update********************************************************************************
-	if(ECap1Regs.ECFLG.bit.CEVT1&&ECap2Regs.ECFLG.bit.CEVT1&&ECap5Regs.ECFLG.bit.CEVT4)											// If capture event 1 occurs on ecap1 do the following and event 4 on ecap5
+	if(ECap1Regs.ECFLG.bit.CEVT1&&ECap2Regs.ECFLG.bit.CEVT1&&ECap5Regs.ECFLG.bit.CEVT2)											// If capture event 1 occurs on ecap1 do the following and event 4 on ecap5
 	{
 		old_phase=ECap2Regs.CAP1 - ECap1Regs.CAP1;														// Set value for old_phase (current falling edge-voltage rising edge)
 		if (old_phase>-900 && old_phase<900)															// Filter out erroneous values, values should not be any greater than 90° apart
@@ -601,9 +783,10 @@ void cpu_timer0_isr()
 		ECap1Regs.ECCTL2.bit.REARM=1;
 		ECap2Regs.ECCLR.bit.CEVT1=1;
 		ECap2Regs.ECCTL2.bit.REARM=1;
-		ECap5Regs.ECCLR.bit.CEVT4=1;
+		ECap5Regs.ECCLR.bit.CEVT2=1;
 		ECap5Regs.ECCTL2.bit.REARM=1;
-		frequency = 150e6/(ECap5Regs.CAP2-ECap5Regs.CAP1);												// Calculate frequency (150e6 is speed of processor)
+		frequency = 150e6/ECap5Regs.CAP2;																// Calculate frequency (150e6 is speed of processor)
+																										// Read cap value. (Note eCAP5 is setup as difference capture so the measurement is directly the period)
 		time_delay = pow((150e6/phase),-1);																// Calculate how much time occurs between the two signals being compared to get the phase angle (theta = 360°*f*time_delay)
 		pf = cos((360*frequency*time_delay)*PI/180);													// Calculate power factor
 		pf_moving_average = (alpha * pf) + (1-alpha) * pf_moving_average;								// Calculate moving average
@@ -615,23 +798,27 @@ void cpu_timer0_isr()
 	//***********************************************************************START US MODULE*****************************************************************************
 	if(sys_on && co_done && !sys_fail)																	// Sys on and doing Co should not go in here until Co done
 	{
-		if(start_ctr<200)																				// Let sys settle before using error checks
-			start_ctr++;
-		if((!pll_on)&&(!sys_fail))																		// Start up US
+		if((!pll_on)&&(!sys_fail)&&no_restart_ctr<=NO_US_START&&restart_ctr<MAX_RESTARTS)				// Start up US
 		{
-			no_restart_ctr++;
-			if((vco_in_val<400)&&(restart_ctr<MAX_RESTARTS))											// Let analog PLL capture and control
+			no_restart_ctr++;																			// Start a counter so if pll isn't started correctly it will time out and issue a fault
+			ana_or_dig_freq(ANALOG);																	// Turn on PLL switches, note at this point phase command should be 0 so vco_in_val starts at the lower end
+			if(vco_in_val<200)																			// Ensure vco_in_val is low before proceeding
+				vcoInLowCtr++;
+			else
+				vcoInLowCtr=0;
+			if(vcoInLowCtr>STARTUP_DELAY)																// Ensure vco_in_val is low for STARTUP_DELAY amount of time
 			{
-				ana_or_dig_freq(ANALOG);
-				pll_on=1;
+				PHASE_CMD_ePWM=START_PHASE;																// Once we are sure vco_in_val is low then set the phase command that is required
+				vcoInLowCtr=0;																			// Reset counter for next lock
+				pll_on=1;																				// Indicate to system that pll is on
 			}
-			else if(((restart_ctr>=MAX_RESTARTS))||(no_restart_ctr>10000))			// System restarted without first capturing a resonance
-			{
-				ultrasound_on_off(ULTRA_OFF);
-				sys_fail=CANT_LOCK;
-				Recoverable_Error();
-			}
-			sys_watchword|=0x0F00;
+			sys_watchword|=0x0F00;																		// Update sys watchword
+		}
+		else if(no_restart_ctr>NO_US_START||restart_ctr>=MAX_RESTARTS)									// If it takes too long for vco_in_val to come down issue a fault
+		{
+			ultrasound_on_off(ULTRA_OFF);
+			sys_fail=CANT_LOCK;
+			Recoverable_Error();
 		}
 		//***********************************************************************END START US MODULE*********************************************************************
 
@@ -646,7 +833,7 @@ void cpu_timer0_isr()
 				else if(ana_agc_on&&(PHASE_CMD_ePWM<(START_PHASE+150)))									// After system has locked increase phase command
 					PHASE_CMD_ePWM++;
 				else if((Stable_Ctr<STABLE_COUNTER)&&ana_agc_on&&(PHASE_CMD_ePWM>=(START_PHASE+150)))
-					Stable_Ctr++, vco_in_last_ctr=0;
+					Stable_Ctr++;
 				else if(Stable_Ctr>=STABLE_COUNTER)
 				{
 					sys_stable=1;
@@ -671,12 +858,6 @@ void cpu_timer0_isr()
 					sys_fail=MASTER_RESTART_ERROR;
 					Recoverable_Error();
 				}
-			}
-			else if(ana_run_status==FREQ_ERROR)															// If sys could not capture after N re-starts, user must remove US command and try again.
-			{
-				ultrasound_on_off(ULTRA_OFF);
-				sys_fail=FREQ_ERROR2;
-				Recoverable_Error();
 			}
 			if(ana_run_status!=SYS_RESTART)
 			{
@@ -723,82 +904,68 @@ void cpu_timer0_isr()
 		//***********************************************************************END MONITOR UNEXPECTED RUNNING MODULE***************************************************
 
 		//***********************************************************************FREQUENCY WINDOW ADJ MODULE*************************************************************
-		if(ECap5Regs.ECFLG.bit.CEVT4)																	// Setup window function, Perform the following if the 4th capture event occurred
+		if(ECap5Regs.ECFLG.bit.CEVT2)
 		{
-			if(((low_window_adj<WINDOW_ADJ_PERIOD)||!low_window_init)&&!window_delay)					// Continue adjusting low end of window until WINDOW_ADJ_PERIOD or window_delay has timed out
+			frequency = 150e6/ECap5Regs.CAP2;																	// Calculate frequency F=150e6/T
+																												// Read cap value. (Note eCAP5 is setup as difference capture so the measurement is directly the period)
+			if(cal_freq_timer<10000 && freq_delay>FREQ_DELAY_TIME)												// Adjust low freq for ~1 sec and allow 1ms between adjusting
 			{
-				low_limit  = 150000000/LOW_FREQ;														// 150e6 comes from processor clock speed (150MHz)
-				DIG_FREQ_ePWM=LOW_VCO;																	// Set frequency low to adjust low end of PLL window
-				window_start_ctr++;
-				window_val=ECap5Regs.CAP4-ECap5Regs.CAP1;												// Subtract the 1st rising edge with the 4th rising edge (allows for some averaging)
-				window_val/=3;																			// Divide by 3 because 3 periods were captured, Calculate period of wave = 1/f
-				if(!low_window_init)
+				if(DIG_FREQ_ePWM != LOW_VCO)																	// Make sure DIG_FREQ_ePWM is at the low end before adjusting "R2" of PLL
+					DIG_FREQ_ePWM = LOW_VCO;
+				else if(frequency>LOW_FREQ*1.01 && DIG_FREQ_ePWM==LOW_VCO && R2_ePWM>LOW_PWM)					// Coarse Adjust, within 1%
+					R2_ePWM-=10;
+				else if(frequency<LOW_FREQ*0.99 && DIG_FREQ_ePWM==LOW_VCO && R2_ePWM<HIGH_PWM)					// Coarse Adjust, within 1%
+					R2_ePWM+=10;
+				else if(frequency>LOW_FREQ*1.002 && DIG_FREQ_ePWM==LOW_VCO && R2_ePWM>LOW_PWM)					// Fine Adjust, within 0.2%
 				{
-					if((window_val < low_limit-200)&&(r2_val>LOW_PWM))									// Course adjust to make loop faster.If window_val is small, freq is too high (window_val is a period)
-						r2_val -= 10;																	// Decreasing pulse width lowers FET gate volts, causes higher R and lower freq / greater period
-					else if((window_val > low_limit+200)&&(r2_val<HIGH_PWM))
-						r2_val += 10;
-					R2_ePWM = r2_val;																	// Store new r2_val into the ePWM unit
+					R2_ePWM--;
+					low_calibration_complete = 1;																// Indication that calibration complete
 				}
-				if(window_start_ctr>(WINDOW_ADJ_PERIOD/4))												// After set period of time start fine adjustment
+				else if(frequency<LOW_FREQ*0.998 && DIG_FREQ_ePWM==LOW_VCO && R2_ePWM<HIGH_PWM)					// Fine Adjust, within 0.2%
 				{
-					if((window_val<(low_limit-5))&&(r2_val>LOW_PWM))
-						r2_val--;																		// Decreasing pulse width lowers FET gate volts, causes higher R and lower freq / greater period
-					else if((window_val>(low_limit+5))&&(r2_val<HIGH_PWM))                              // Increase R2_ePWM if window_val is greater than low_limit and R2_ePWM is less than HIGH_VCO
-						r2_val++;
-					else
-						low_window_init=1;																// LOW WINDOW adjustment is done enable HIGH WINDOW adjustment
-					R2_ePWM=r2_val;
-					low_window_adj++;
+					R2_ePWM++;
+					low_calibration_complete = 1;																// Indication that calibration complete
 				}
-				if(low_window_adj>=WINDOW_ADJ_PERIOD)													// Reset counters once low_window_adj reaches WINDOW_ADJ_PERIOD
-				{
-					high_window_adj=0;
-					window_start_ctr=0;
-				}
-			}
-			else if(low_window_init&&!window_delay)
-			{
-				high_limit = 150000000/HIGH_FREQ;														// Calculate high limit window value
-				DIG_FREQ_ePWM=HIGH_VCO;
-				window_start_ctr++;
-				window_val=ECap5Regs.CAP4-ECap5Regs.CAP1;
-				window_val/=3;
-				if(!high_window_init)
-				{
-					if ((window_val < high_limit-200)&&(r1_val>LOW_PWM))								// Course adjustment to speed up loop
-						r1_val -= 10;
-					else if( (window_val > high_limit+200)&&(r1_val<HIGH_PWM))
-						r1_val += 10;
-					R1_ePWM = r1_val;
-				}
-				if(window_start_ctr>(WINDOW_ADJ_PERIOD/4))
-				{
-					if((window_val<(high_limit-5))&&(r1_val>LOW_PWM))
-						r1_val--;																		// Decreasing pulse width lowers FET gate volts, causes higher R and lower freq / greater period
-					else if((window_val>(high_limit+5))&&(r1_val<HIGH_PWM))
-						r1_val++;																		// Decreasing pulse width lowers FET gate volts, causes higher R and lower freq / greater period
-					else
-						high_window_init=1;
-					R1_ePWM=r1_val;
-					high_window_adj++;
-				}
-				if(high_window_adj>=WINDOW_ADJ_PERIOD)													// Reset counters once high_window_adj reaches WINDOW_ADJ_PERIOD
-				{
-					low_window_adj=0;
-					window_start_ctr=0;
-				}
-			}
-			if (window_delay<20)																		// Add delay for frequencies to settle
-				window_delay++;
-			else
-			{
-				frequency = 150e6/(ECap5Regs.CAP2-ECap5Regs.CAP1);
-				ECap5Regs.ECCLR.bit.CEVT4=1;															// Clear the 4th capture event flag
-				ECap5Regs.ECCTL2.bit.REARM=1;															// Re-arm the eCAP5
-				window_delay = 0;																		// Reset window_delay
-			}
+				else if(R2_ePWM>=HIGH_PWM || R2_ePWM<=LOW_PWM)
+					low_calibration_complete = 0;
+				else
+					low_calibration_complete=1;
+				freq_delay=0;																					// Reset 1ms delay
 
+			}
+			else if(cal_freq_timer>10000 && freq_delay>FREQ_DELAY_TIME && low_calibration_complete)				// Adjust "R1" high end of window for approx. 1 second
+			{
+				if(DIG_FREQ_ePWM != HIGH_VCO)																	// Make sure DIG_FREQ_ePWM is at the high end before adjusting "R1" of PLL
+					DIG_FREQ_ePWM = HIGH_VCO;
+				else if(frequency>HIGH_FREQ*1.01 && DIG_FREQ_ePWM==HIGH_VCO && R1_ePWM>LOW_PWM)
+					R1_ePWM-=10;
+				else if(frequency<HIGH_FREQ*0.99 && DIG_FREQ_ePWM==HIGH_VCO && R1_ePWM<HIGH_PWM)
+					R1_ePWM+=10;
+				else if(frequency>HIGH_FREQ*1.002 && DIG_FREQ_ePWM==HIGH_VCO && R1_ePWM>LOW_PWM)
+				{
+					R1_ePWM--;
+					high_calibration_complete = 1;
+				}
+				else if(frequency<HIGH_FREQ*0.998 && DIG_FREQ_ePWM==HIGH_VCO && R1_ePWM<HIGH_PWM)
+				{
+					R1_ePWM++;
+					high_calibration_complete = 1;
+				}
+				else if(R1_ePWM>=HIGH_PWM || R1_ePWM<=LOW_PWM)
+					high_calibration_complete = 0;
+				else
+					high_calibration_complete=1;
+				freq_delay=0;
+			}
+			else if (cal_freq_timer>20000)
+				cal_freq_timer = 0;
+			if(low_calibration_complete && high_calibration_complete && sys_fail>=INIT_NOT_DONE && runTime>0)	// Resets sys_fail when freq window is calibrated and when pump door gets open during running
+				sys_fail=NONE;																					// Notify system frequency window is calibrated
+			else if((!low_calibration_complete||!high_calibration_complete)&&(sys_fail!=WATCHDOG_ERROR&&sys_fail!=VOLTS_WHILE_OFF))
+				sys_fail=INIT_NOT_DONE;
+
+			ECap5Regs.ECCLR.bit.CEVT2 = 1;																// Re-enable the CAP2 interrupt
+			ECap5Regs.ECCTL2.bit.REARM=1;																// Re-arm the eCAP5
 		}
 		sys_watchword|=0x0F00;																			// All done check
 	}
@@ -820,7 +987,7 @@ void cpu_timer0_isr()
 
 	//*****************************************************************************WATCHDOG STATUS***********************************************************************
 	sys_integrity=Sys_Watchdog();																		// Check status of watchdog
-	if(sys_integrity==SYS_DOG_OUT&&state!=sNONE)
+	if(sys_integrity==SYS_DOG_OUT)
 	{
 		ultrasound_on_off(ULTRA_OFF);
 		sys_fail=WATCHDOG_ERROR;
@@ -831,18 +998,18 @@ void cpu_timer0_isr()
 	if(!co_on)
 		new_ad_vals=0;
 
-	if(ECap4Regs.ECFLG.bit.CEVT3)
+	if(ECap4Regs.ECFLG.bit.CEVT2)
 	{
-		pulseFreq=150e6/(ECap4Regs.CAP3-ECap4Regs.CAP1);												// This gives freq of the three pulses -> rev/s, encoder spec = 3 pulses per revolution
-		pumpRPM=(pulseFreq*60)/30;																		// 60s in 1 minute, 30 = gear ratio for pump head to motor shaft
+		pulseFreq=150e6/(ECap4Regs.CAP2-ECap4Regs.CAP1);												// This gives freq of the pulses -> rev/s, encoder spec = 4 pulses per revolution
+		pumpRPM=(pulseFreq*60)/4;																		// 60s in 1 minute, divied by 4 pulses per revolution
 		newPumpValue=1;
-		ECap4Regs.ECCLR.bit.CEVT3=1;																	// Clear the 2nd capture event flag
+		ECap4Regs.ECCLR.bit.CEVT2=1;																	// Clear the 2nd capture event flag
 		ECap4Regs.ECCTL2.bit.REARM=1;																	// Re-arm the eCAP4
 	}
 	else if(PUMP_SPEED==PUMP_OFF)
 		pumpRPM=0;
 
-	//checkPump();
+	checkPump();
 
 	AdcRegs.ADCTRL2.bit.RST_SEQ1 = 1;																	// Reset ADC Seq 1
 	AdcRegs.ADCST.bit.INT_SEQ1_CLR = 1;																	// Clears the SEQ1 interrupt flag bit, INT_SEQ1
@@ -975,85 +1142,58 @@ void ANA_RUNNING_AND_LOCKED(void)
 		for(j=0; j<10; j++)
 			phase_error_avg+=sample_window[j];
 		phase_error_avg/=10;																			// Average phase error
-		if((!lost_lock)&&(!restart_timer)&&(pll_on)&&(restart_ctr<MAX_RESTARTS))						// Monitor lock status
+		if((!lost_lock)&&(pll_on)&&(restart_ctr<MAX_RESTARTS))											// Monitor lock status
 		{
-			pll_ctr=0;
 			if((phase_error_avg<2500)&&(phase_error_avg>1800)&&(vco_in_val<3500))						// Phase error within limits and VCO not too far?
 			{
 				if(capture_ctr<201)																		// True for > 100 times = lock
 					capture_ctr++;																		// increment if sys is locked
-				if(sys_stable&&lock)
-				{
-					vco_in_last_array[vco_in_last_position] = vco_in_val;
-					if (vco_in_last_position<1000)
-						vco_in_last_position++;
-					else
-						vco_in_last_position=0;
-					if (vco_in_last_ctr<1000)
-						vco_in_last_ctr++;
-					else if (abs(vco_in_last_array[0]-vco_in_last_array[999])>20)
-						vco_in_last = vco_in_last_array[0];
-					else
-					{
-						if(vco_in_val>200)
-							vco_in_last=vco_in_val-100;													// Subtract 100 for error correction while probe is loaded
-						else
-							vco_in_last=vco_in_val;
-					}
-				}
+				if(sys_stable&&lock&&lockCtr<=LOCK_TIME)
+					lockCtr++;
 				ana_run_status=SYS_ANA_RUN_OK;															// Tell timer0 things OK
 			}
-			if((capture_ctr>200)&&(!lock))																// Sys locked if phase error is within limits 100 times
+			if((capture_ctr>200)&&(!lock))																// Sys locked if phase error is within limits 200 times
 			{
-				restart_timer=0;																		// Reset restart timers
-				restart_ctr=0;
+				lockCtr=0;
 				lock=1;																					// Tell system it is locked
 			}
 			if(vco_in_val>=3500)																		// Initiate a restart if vco_in_val has flown up to top of window
-				lost_lock=1;																			// Indicate to system that it has lost lock
-		}
-		else if((restart_ctr<=MAX_RESTARTS)&&(pll_on||restart_timer))									// Go here if re-start required. PLL will be on @ first entry in process, after that, restart_timer will be on
-		{																								// If no PLL and no restart_timer, system has turned on US but still in dig mode sitting at low window
-			if(restart_timer==0)																		// Set up init conditions for re-start
 			{
-				ana_run_status=SYS_RESTART;																// Tell timer0 re-starting
-				restarted+=20;																			// Counter used to decrement PHASE_COMMAND for each restart
 				ultrasound_on_off(ULTRA_OFF);															// Turn ultrasound off
-				sys_on=0;																				// Set sys_on indicator to 0
-				if(START_PHASE>MIN_PHASE+40)
+				restart_ctr++;																			// Increment number of times restart has occurred
+				lost_lock=1;																			// Indicate to system that it has lost lock
+				pll_on=0;																				// Reset indicator for PLL on
+				lock=0;																					// Make sure lock indictor is reset
+				no_restart_ctr=0;																		// Restart PLL timer
+				restartedTime=getTickTime();															// Grab current tick Time so there is a delay when restarting
+				ana_run_status=SYS_RESTART;																// Tell timer0 re-starting
+				if(lockCtr>LOCK_TIME)																	// If lockCtr is greater than LOCK_TIME don't allow restarts, only restart at start up
+				{
+					ultrasound_on_off(ULTRA_OFF);
+					sys_fail=CANT_LOCK;
+					Recoverable_Error();
+				}
+				if(START_PHASE>MIN_PHASE+40)															// Decrease phase command if restarting to have better chance of starting
 					START_PHASE-=40;
 				if(START_PHASE<MIN_PHASE)
 					START_PHASE=MIN_PHASE;
-				PHASE_CMD_ePWM=START_PHASE;
-				restart_timer++;																		// This controls re-start timing
-				lock=0;																					// Tell system it is no longer locked
-				agc_delay_ctr=0;
-				if(!vco_in_last)
-					restart_ctr++;																		// This counts number of attempts - then fails
-				else
-					restart_ctr=MAX_RESTARTS;
-			}
-			else if(restart_timer>=1000)																// Timer finished and ready to try capture
-			{
-				restart_timer=0;
-				for(j=0; j<SAMPLE_WINDOW_VALS; j++)														// Phase error vals go in here and are averaged - no history for re-start
-					sample_window[j]=0;
-				lost_lock=0;																			// Update indicators
-				sys_on=1;																				// Done resetting values allow system to turn on
-				ultrasound_on_off(ULTRA_ON);															// Restart ultrasound
-			}
-			else																						// Count up time to next re-start
-			{
-				sys_on=0;																				// Keep system off until restart timer has reached its limit
-				restart_timer++;
+				sys_on=0;
 			}
 		}
-		else if(!pll_on)																				// Sys has re-started, is in dig mode and waiting for signals to come up before allowing analog PLL control
+		else if(lost_lock&&restart_ctr<MAX_RESTARTS)													// Restart
 		{
-			if(pll_ctr<PLL_CTR_MAX)																		// Should not be in this mode too long
-				pll_ctr++;
-			else
-				ana_run_status=FREQ_ERROR;
+			if(getTickTime()-restartedTime>RESTART_DELAY)												// Allow restart if delay is up
+			{
+				sys_on=1;
+				lost_lock=0;
+				ultrasound_on_off(ULTRA_ON);															// Restart ultrasound
+			}
+		}
+		else if(restart_ctr>=MAX_RESTARTS)																// If attemped to start MAX_RESTARTS then issue a can't lock failure
+		{
+			ultrasound_on_off(ULTRA_OFF);
+			sys_fail=CANT_LOCK;
+			Recoverable_Error();
 		}
 	}
 }
@@ -1068,24 +1208,20 @@ void ANA_RUNNING_AND_LOCKED(void)
 void DETECT_AGC_FAULT(void)
 {
 	sys_watchword|=0x0400;
-	if(start_ctr>100)
+	if(lock&&sys_stable)
 	{
 		if ((agc_pwm_val>2200)&&((i_mot_val<100)||(volts_val<200)||(current_val<200)))					// AGC has ramped up and is not coming back, (no control of AGC)
 			agc_fault_ctr++;
 		else
 			agc_fault_ctr=0;
-		if(agc_fault_ctr>5000)
-		{
-			ultrasound_on_off(ULTRA_OFF);
-			ana_run_status=AGC_FAULT;
-			sys_fail=AGC_ERROR2;
-			Recoverable_Error();
-		}
-		if((agc_error_val<1000)&&(agc_pwm_val>2200))													// This is a normal overload
+		if(((agc_error_val<2048*.9)||(agc_error_val>2048*1.1))&&(agc_pwm_val>2200))						// This is a normal overload
 			overload_ctr++;
 		else
 			overload_ctr=0;
-		if(overload_ctr>10000)
+
+		if(agc_fault_ctr>5000)
+			ana_run_status=AGC_FAULT;
+		else if(overload_ctr>10000)
 			ana_run_status=OVERLOAD_FAULT;
 		else
 			ana_run_status=SYS_ANA_RUN_OK;
@@ -1149,7 +1285,6 @@ unsigned int Cal_I_mot(void)
 	//set algorithm to determine specified voltage
 	DIG_AGC_ePWM=1700;																					// Set Voltage to a reasonable level to allow for accurate C0 calculation
 	DELAY_US(10000);
-	i_mot_ctr=0;
 	i_mot_valid_ctr=0;
 	pot_val=START_POT_VAL;																				// Set the pot to the extreme value to pass the entire signal
 	xmt_test_val=spi_xmit(0x1802);																		// Send initial command to POT to let it know the next command is to set the pot value
@@ -1217,6 +1352,7 @@ void ultrasound_on_off(int a)
 	if (a == ULTRA_OFF)
 	{
 		AGC_CMD_ePWM=DEFAULT_AGC;
+		DIG_AGC_ePWM=AGC_START_VAL;
 		ana_or_dig_AGC(DIGITAL);																		// Switch AGC to digital
 		while (turnoff_delay<10000&&agc_ramp_down_enabled)
 			sys_watchword |= 0x00F0, turnoff_delay++,DIG_FREQ_ePWM=LOW_VCO;								// Delay to allow AGC to come down before frequency is moved
@@ -1226,12 +1362,7 @@ void ultrasound_on_off(int a)
 		SYS_ON_2_OFF;
 		ULTRASOUND_OFF;																					// Turn off ultra sound and restore flags and variables to initial state
 		agc_delay_ctr=0;
-		if(!restarted)
-		{
-			PHASE_CMD_ePWM=START_PHASE;
-			AGC_CMD_ePWM=DEFAULT_AGC;
-			DIG_AGC_ePWM=AGC_START_VAL;
-		}
+		PHASE_CMD_ePWM=0;																				// Set phase command to 0 when idle/when starting to ensure vco_in_val is low when activating pll switch
 		pll_on=0;
 		lock=0;
 		for(j=0; j<10; j++)
@@ -1240,19 +1371,10 @@ void ultrasound_on_off(int a)
 			sample_window_2[j]=0;
 		ana_agc_on=0;
 		capture_ctr=0;
-		start_ctr=0;
-		vco_adj_done = 0;
-		vco_ctr = 0;
 		sys_stable=0;
 		Stable_Ctr=0;
-		pll_ctr=0;
 		agc_fault_ctr=0;
-		vco_in_last_position=0;
-		co_done=0;
-		sys_on=0;
-		energyOn=0;
-		if(vco_in_last>3700)
-			vco_in_last=0;
+		overload_ctr=0;
 	}
 	else if (a == ULTRA_ON)
 	{
@@ -1272,7 +1394,7 @@ void ultrasound_on_off(int a)
 void Unrecoverable_Error(void)
 {
 	unsigned int bone_ctr;
-	ultrasound_on_off(ULTRA_OFF);
+	ultrasound_on_off(ULTRA_OFF); if(state!=UNRECOVERABLE_ERROR) {state=RUN;}
 	sys_watchword|=0xFFF0;
 	WD_BONE_ON;																						// GIVE_DOG_BONE;
 	bone_ctr=20;
@@ -1321,12 +1443,12 @@ unsigned long getTickTime(void)
 void blinkLight(void)
 {
 	static unsigned long hpTimer;
-	static unsigned int state=0;
-	switch(state)
+	static unsigned int blinkState=0;
+	switch(blinkState)
 	{
 		case 0:
 			hpTimer=getTickTime();
-			state=1;
+			blinkState=1;
 			break;
 		case 1:
 			if(getTickTime()<hpTimer+500)
@@ -1334,7 +1456,7 @@ void blinkLight(void)
 			else if(getTickTime()<hpTimer+1000)
 				HP_LIGHT_ON;
 			else
-				state=0;
+				blinkState=0;
 			break;
 		default:
 			break;
@@ -1347,83 +1469,47 @@ void blinkLight(void)
 //################################################################################################################################################################################################
 unsigned char HSWState(void)
 {
-	unsigned char hsw_sys_on=0;
-	if(!FSW_DETECT)
+	unsigned char hsw_sys_on=0, buttonPressed=0;
+
+	if(FSW_DETECT)
 	{
-		switch( mode )
+		buttonPressed = FSW;
+		if(HandSwitch()&&!energyOn)																		// If user is trying to use hand piece button when foot switch is plugged switch states to notify user
 		{
-			case 0:																						// Detect 1st button down
-				if (HandSwitch())
-				{
-					button_timer=0;																		// Initialize button timer to 0
-					mode = 1;																			// First button press detected move to the next detection state (1st release)
-				}
-				break;
-			case 1:																						// Detect 1st button release
-				if (!(HandSwitch())&&button_timer<=3000)												// Button Release and button_timer has not exceeded 3000 (user is engaging double click latch action)
-					mode = 2;
-				else if (!(HandSwitch())&&button_timer>3000)											// Button Release and button_timer has exceeded 3000, turn off system (momentary action, turn off)
-				{
-					hsw_sys_on = 0;																		// Make sure system is off
-					mode = 0;																			// Reset hand switch states
-				}
-				else if ((HandSwitch())&&(button_timer>3000))											// Button still depressed and button_timer has waited long enough (momentary action, turn on)
-				{
-					hsw_sys_on = 1;																		// Allow system to run with hand switches
-				}																						// Button release detected, move on to next detection
-				break;
-			case 2:																						// Detect 2nd button down
-				if (button_timer>10000)																	// If 2nd button button down is not received soon enough reset double click
-				{
-					mode = 0;
-					hsw_sys_on = 0;																		// Make sure system is off
-				}
-				if (HandSwitch())																		// 2nd button down detected
-				{
-					mode = 3;																			// 2nd button down detected, move on to the next detection
-					button_timer = 0;
-				}
-				break;
-			case 3:																						// Detect 2nd button release
-				if ((HandSwitch())&&(button_timer>5000))												// Button still depressed and button_timer has waited long enough (momentary action, turn on, after the double click)
-				{																						// User held button down too long and button will now be used as a momentary button
-					hsw_sys_on = 1;																		// Allow system to run
-				}
-				else if (!(HandSwitch())&&button_timer>5000)											// Button Release and button_timer has exceeded 10000, turn off system (momentary action, turn off, after the double click)
-				{
-					hsw_sys_on = 0;																		// Make sure system is off
-					mode = 0;
-				}
-				else if (!(HandSwitch())&&button_timer<=5000)											// 2nd button release detected and time is less than 10000 so user intended to double click latch the system
-				{
-					mode = 4;																			// Move on to the next detection
-					hsw_sys_on = 1;																		// Allow system to run
-				}
-				break;
-			case 4:																						// Detect 3rd button down, to shut off system
-				if (HandSwitch())
-				{
-					hsw_sys_on = 0;
-					mode = 5;
-				}
-				else if (!(HandSwitch()))
-					hsw_sys_on=1;																		// Reset debounce if no switch is pressed
-				break;
-			case 5:																						// Detect 3rd button release, reset double click
-				if (!(HandSwitch()))
-					mode = 0;
-				break;
+			previousState=state;
+			state=USE_FOOTSWITCH;
 		}
 	}
 	else
+		buttonPressed = HandSwitch();
+
+	if(!sys_fail)																							// Don't allow button state change while in recoverable error, allow recoverable error state to detect button
 	{
-		if(FSW)
-			hsw_sys_on=1;																				// User is pressing foot switch
-		else
-			hsw_sys_on=0;
-		if((HandSwitch()&&!energyOn)&&state!=DELAY)																		// If user is trying to use hand piece button when foot switch is plugged switch states to notify user
+		switch( mode )
 		{
-			state=USE_FOOTSWITCH;
+			case 0:																							// Detect 1st button down
+				if (buttonPressed)
+					mode = 1;																				// First button press detected move to the next detection state (1st release)
+				break;
+			case 1:																							// Detect 1st button release
+				hsw_sys_on = 1;
+				if(!buttonPressed)
+					mode = 2;
+				break;
+			case 2:																							// Detect button down after system turned on
+				hsw_sys_on = 1;																				// Keep system on until another press
+				if(buttonPressed)
+				{
+					hsw_sys_on = 0;
+					mode = 3;
+				}
+				break;
+			case 3:																							// Detect button release after turning off
+				if(!buttonPressed)
+				{
+					mode=0;
+				}
+				break;
 		}
 	}
 	return hsw_sys_on;
@@ -1433,28 +1519,32 @@ unsigned char HSWState(void)
 //################################################################################################################################################################################################
 //						Function to beep beeper three times before starting ultrasound
 //################################################################################################################################################################################################
-unsigned char doneBeeping(unsigned char shouldBeep, unsigned char reset)
+unsigned char doneBeeping(unsigned char shouldBeep, unsigned char reset, unsigned char alert, unsigned char beeps)
 {
 	static unsigned long beepTimer;
-	static unsigned int state=0, beepCount=0;
+	static unsigned int beepState=0, beepCount=0, beepTime;
 	if(reset)
-		beepCount=0;
-	if(shouldBeep)
+		beepCount=0, beepState=0;
+	if(alert==STARTUP)
+		beepTime=500;
+	else
+		beepTime=250;
+	if(shouldBeep&&beepCount<beeps)
 	{
-		switch(state)
+		switch(beepState)
 		{
 			case 0:
 				beepTimer=getTickTime();
-				state=1;
+				beepState=1;
 				break;
 			case 1:
-				if(getTickTime()<beepTimer+500)
+				if(getTickTime()<beepTimer+beepTime)
 					BEEPER_ON;
-				else if(getTickTime()<beepTimer+1000)
+				else if(getTickTime()<beepTimer+beepTime*2)
 					BEEPER_OFF;
 				else
 				{
-					state=0;
+					beepState=0;
 					beepCount++;
 				}
 				break;
@@ -1464,7 +1554,7 @@ unsigned char doneBeeping(unsigned char shouldBeep, unsigned char reset)
 	}
 	else
 		BEEPER_OFF;
-	if(beepCount==3)
+	if(beepCount>=beeps)
 		return 1;
 	else
 		return 0;
@@ -1478,16 +1568,16 @@ unsigned char doneBeeping(unsigned char shouldBeep, unsigned char reset)
 unsigned char alertBeep(unsigned char shouldBeep, unsigned char reset)
 {
 	static unsigned long alertTimer, pauseTimer;
-	static unsigned int state=0, alertCount=0;
+	static unsigned int alertState=0, alertCount=0;
 	if(reset)
-		alertCount=0;
+		alertCount=0, alertState=0;
 	if(shouldBeep)
 	{
-		switch(state)
+		switch(alertState)
 		{
 			case 0:
 				alertTimer=getTickTime();
-				state=1;
+				alertState=1;
 				break;
 			case 1:
 				if(getTickTime()<alertTimer+125)
@@ -1496,24 +1586,24 @@ unsigned char alertBeep(unsigned char shouldBeep, unsigned char reset)
 					BEEPER_OFF;
 				else
 				{
-					state=0;
+					alertState=0;
 					alertCount++;
 					if(alertCount==3)
-						state=2;
+						alertState=2;
 				}
 				break;
 			case 2:
 				pauseTimer=getTickTime();
-				state=3;
+				alertState=3;
 				break;
 			case 3:
 				if(getTickTime()-pauseTimer>500)
-					state=0;
+					alertState=0;
 			default:
 				break;
 		}
 	}
-	if(alertCount==6)
+	if(alertCount>=6)
 		return 1;
 	else
 		return 0;
@@ -1553,39 +1643,47 @@ unsigned char HandSwitch(void)
 //################################################################################################################################################################################################
 void checkPump(void)
 {
-	static unsigned char errorCtr=0,pumpTimer=0,pumpSpeed=0;
+	static unsigned char errorCtr=0,pumpTimer=0,pumpSpeed=0,noNewPumpValCtr=0;
 	if(PUMP_SPEED!=PUMP_OFF)																			// Check to see if pump is supposed to be running
 	{
-		if(CpuTimer0.InterruptCount>100)																// Monitor pump every 10ms
+		if(CpuTimer0.InterruptCount>2000)																// Monitor pump every 200ms
 		{
-			if(pumpTimer<101)																			// Timer used for setting the current pumpSpeed used for comparing to the "real time speed"
+			CpuTimer0.InterruptCount=0;																	// Reset 10ms timer
+			if(pumpTimer<6)																				// Timer used for setting the current pumpSpeed used for comparing to the "real time speed"
 				pumpTimer++;
-			CpuTimer0.InterruptCount=0;
-			if(pumpRPM==0)																				// Check if pump is not running when it is supposed to be
+			if(pumpTimer>5&&pumpRPM==0)																	// Check if pump is not running when it is supposed to be
 			{
 				errorCtr++;
 			}
-			if(pumpTimer>100&&pumpRPM&&!pumpSpeed)														// Set pumpSpeed after 1 second of running
+			if(pumpTimer>5&&pumpRPM&&!pumpSpeed)														// Set pumpSpeed after 1 second of running
 				pumpSpeed=pumpRPM;
-			if(newPumpValue&&pumpSpeed&&(pumpRPM<pumpSpeed*.8||pumpRPM>pumpSpeed*1.2))					// Allow 20% variablity pump's encoder isn't very accurate
+			if(newPumpValue)
 			{
-				errorCtr++;
-				newPumpValue=0;
+				if(pumpSpeed&&(pumpRPM<pumpSpeed*.8||pumpRPM>pumpSpeed*1.2)&&pumpRPM!=65535)			// Allow 20% variablity pump's encoder isn't very accurate, RPM of 65535 is errouneous don't allow error
+				{
+					errorCtr++;
+					noNewPumpValCtr=0;
+					newPumpValue=0;
+				}
+				else
+				{
+					errorCtr=0;
+					noNewPumpValCtr=0;
+					newPumpValue=0;
+				}
 			}
-			else if(newPumpValue&&pumpSpeed&&(pumpRPM>pumpSpeed*.9||pumpRPM<pumpSpeed*1.1))
+			else if(!newPumpValue)																		// Check to make sure pump pulses are setting triggering the ECap4 unit
+				noNewPumpValCtr++;																		// At the maximum RPM (~135) the pump speed can only be updated at about every 111ms, because of the encoder, 4 pulses/rev
+			if(errorCtr>5||noNewPumpValCtr>10)															// Error occurred for >~1 second, or can't capture pump pulses on ECap4 >~2s
 			{
 				errorCtr=0;
-				newPumpValue=0;
-			}
-			else if(!newPumpValue)
-				errorCtr++;
-			if(errorCtr>100)																			// Error occurred for >~1 second
-			{
-				errorCtr=0;
+				noNewPumpValCtr=0;
 				sys_fail=PUMP_ERROR;																	// Update sys_fail
 				previousState=state;
 				if(previousState==LATCHED_PRIMING&&(getTickTime()-primeTimer)<PRIME_TIME)
 					remainingTime=getTickTime()-primeTimer;
+				else if (previousState==MOMENTARY_PRIMING&&(getTickTime()-primeTimer)<PRIME_TIME)
+					remainingTime=0;																	// Reset remainingTime so it goes back to ready to prime state
 				else
 					remainingTime=PRIME_TIME;
 				state=RUN;																				// Update state
@@ -1593,5 +1691,37 @@ void checkPump(void)
 		}
 	}
 	else
-		pumpTimer=0,pumpSpeed=0,errorCtr=0;
+		pumpTimer=0,pumpSpeed=0,errorCtr=0,noNewPumpValCtr=0;
 }
+
+
+
+//##################################################################################################################################################################
+//						HandPieceStatus Debounce
+//						Returns a 0 if handpiece is disconnected
+//						Returns a 1 if handpiece is connected
+//##################################################################################################################################################################
+unsigned char handPieceStatus(void)
+{
+	static unsigned char handpieceState=0;
+	if(NO_DEVICE)
+	{
+		if(handpieceDisconDebounce>DEBOUNCE_TIME)
+		{
+			handpieceConDebounce=0;
+			handpieceState=0;
+		}
+	}
+	else
+	{
+		if(handpieceConDebounce>DEBOUNCE_TIME)
+		{
+			handpieceDisconDebounce=0;
+			handpieceState=1;
+		}
+	}
+	return handpieceState;
+}
+//##################################################################################################################################################################
+//						End HandPieceStatus Debounce
+//##################################################################################################################################################################
