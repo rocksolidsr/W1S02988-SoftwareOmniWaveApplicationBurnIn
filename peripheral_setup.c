@@ -70,6 +70,7 @@ void Gpio_select(void)
 	GpioCtrlRegs.GPCDIR.bit.GPIO71 = 0;																	// Set GPIO 71 as input for door lid
 	GpioCtrlRegs.GPCDIR.bit.GPIO81 = 0;																	// Footswitch detect
 
+	BEEPER_OFF;
 	ULTRASOUND_OFF;																						// PREVENT SYS FROM TURNING ON @ INITIALIZATION
 	SYS_ON_2_OFF;
 

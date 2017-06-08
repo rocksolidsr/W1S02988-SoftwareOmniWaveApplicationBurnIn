@@ -136,7 +136,7 @@ void AudioOff(void);
 void SetInterruptPin(uint16_t Intpin);																	//apis to set interrupt pin
 void ResetCopro(void);																					//api to reset only coprocessor
 void Reset(void);																						//api to reset whole FT_GC via pdn
-void DisplayConfigExternalClock(uint8_t ResType);
+void DisplayConfigExternalClock(void);
 void ActiveInternalClock(void);
 void PDN_Cycle(void);
 
@@ -282,7 +282,7 @@ FT_GEStatus TransferCmdfromflash(prog_uchar *Src,uint32_t NBytes);
 void 		EndTransferCmd();																			//de assert CSpin
 //FT_GEStatus Cmd_GetResult(uint32_t &Result);															//reads the result of the previous commands such as cmd_memcrc,
 																										//cmd_calibration, cmd_regread which has return values. if busy returns busy status
-FT_Status 	Init(uint8_t ResType, uint8_t rotation);
+FT_Status 	Init(uint8_t rotation);
 FT_GEStatus Cmd_GetResults(int8_t *pA,int32_t NBytes);													//reads N bytes of result bytes from current write pointer
 FT_GEStatus UpdateFreeSpace();
 FT_GEStatus ChkGetFreeSpace(uint16_t NBytes);
@@ -305,10 +305,8 @@ void setup_spi_gpio(void);
 #define MEM_WRITE 0x80 																					// FT800 Host Memory Write
 #define MEM_READ  0x00 																					// FT800 Host Memory Write
 
-#define		FT_DISPLAY_QVGA_320x240		0UL
 #define		FT_DISPLAY_WQVGA_480x272 	1UL
-#define 	FT_DISPLAY_RIVERDI_320x240	2UL
-#define		FT_DISPLAY_KYOCERA			3UL
+
 
 #define FT_DISPLAY_VSYNC0_WQVGA 		(0L)
 #define FT_DISPLAY_VSYNC1_WQVGA 		(10L)
@@ -323,62 +321,6 @@ void setup_spi_gpio(void);
 #define FT_DISPLAY_PCLKPOL_WQVGA 		(1L)
 #define FT_DISPLAY_SWIZZLE_WQVGA 		(0L)
 #define FT_DISPLAY_PCLK_WQVGA 			(5L)
-
-#define FT_DISPLAY_VSYNC0_QVGA 			(0L)
-#define FT_DISPLAY_VSYNC1_QVGA 			(2L)
-#define FT_DISPLAY_VOFFSET_QVGA 		(13L)
-#define FT_DISPLAY_VCYCLE_QVGA 			(263L)
-#define FT_DISPLAY_HSYNC0_QVGA 			(0L)
-#define FT_DISPLAY_HSYNC1_QVGA 			(10L)
-#define FT_DISPLAY_HOFFSET_QVGA 		(70L)
-#define FT_DISPLAY_HCYCLE_QVGA 			(408L)
-#define FT_DISPLAY_HSIZE_QVGA 			(320L)
-#define FT_DISPLAY_VSIZE_QVGA 			(240L)
-#define FT_DISPLAY_PCLKPOL_QVGA 		(0L)
-#define FT_DISPLAY_SWIZZLE_QVGA 		(2L)
-#define FT_DISPLAY_PCLK_QVGA 			(8L)
-
-#define FT_DISPLAY_RIVERDI_VSYNC0 		(0L)
-#define FT_DISPLAY_RIVERDI_VSYNC1 		(2L)
-#define FT_DISPLAY_RIVERDI_VOFFSET		(13L)
-#define FT_DISPLAY_RIVERDI_VCYCLE 		(263L)
-#define FT_DISPLAY_RIVERDI_HSYNC0 		(0L)
-#define FT_DISPLAY_RIVERDI_HSYNC1 		(10L)
-#define FT_DISPLAY_RIVERDI_HOFFSET 		(70L)
-#define FT_DISPLAY_RIVERDI_HCYCLE 		(408L)
-#define FT_DISPLAY_RIVERDI_HSIZE		(320L)
-#define FT_DISPLAY_RIVERDI_VSIZE		(240L)
-#define FT_DISPLAY_RIVERDI_PCLKPOL 		(1L)
-#define FT_DISPLAY_RIVERDI_SWIZZLE 		(2L)
-#define FT_DISPLAY_RIVERDI_PCLK			(6L)
-
-#define FT_DISPLAY_KYOCERA_VSYNC0 		(0L)
-#define FT_DISPLAY_KYOCERA_VSYNC1 		(2L)
-#define FT_DISPLAY_KYOCERA_VOFFSET		(18L)
-#define FT_DISPLAY_KYOCERA_VCYCLE 		(262L)
-#define FT_DISPLAY_KYOCERA_HSYNC0 		(0L)
-#define FT_DISPLAY_KYOCERA_HSYNC1 		(2L)
-#define FT_DISPLAY_KYOCERA_HOFFSET 		(68L)
-#define FT_DISPLAY_KYOCERA_HCYCLE 		(408L)
-#define FT_DISPLAY_KYOCERA_HSIZE		(320L)
-#define FT_DISPLAY_KYOCERA_VSIZE		(240L)
-#define FT_DISPLAY_KYOCERA_PCLKPOL 		(0L)
-#define FT_DISPLAY_KYOCERA_SWIZZLE 		(0L)
-#define FT_DISPLAY_KYOCERA_PCLK			(8L)
-
-#define FT_DISPLAY_VSYNC0 				FT_DISPLAY_VSYNC0_WQVGA
-#define FT_DISPLAY_VSYNC1 				FT_DISPLAY_VSYNC1_WQVGA
-#define FT_DISPLAY_VOFFSET				FT_DISPLAY_VOFFSET_WQVGA
-#define FT_DISPLAY_VCYCLE 				FT_DISPLAY_VCYCLE_WQVGA
-#define FT_DISPLAY_HSYNC0 				FT_DISPLAY_HSYNC0_WQVGA
-#define FT_DISPLAY_HSYNC1 				FT_DISPLAY_HSYNC1_WQVGA
-#define FT_DISPLAY_HOFFSET 				FT_DISPLAY_HOFFSET_WQVGA
-#define FT_DISPLAY_HCYCLE 				FT_DISPLAY_HCYCLE_WQVGA
-#define FT_DISPLAY_HSIZE				FT_DISPLAY_HSIZE_WQVGA
-#define FT_DISPLAY_VSIZE				FT_DISPLAY_VSIZE_WQVGA
-#define FT_DISPLAY_PCLKPOL 				FT_DISPLAY_PCLKPOL_WQVGA
-#define FT_DISPLAY_SWIZZLE 				FT_DISPLAY_SWIZZLE_WQVGA
-#define FT_DISPLAY_PCLK					FT_DISPLAY_PCLK_WQVGA
 
 //Chip identifier macros
 #define FT800_CHIPID			0x00010008UL

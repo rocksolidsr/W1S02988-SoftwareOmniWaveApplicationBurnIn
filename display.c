@@ -19,11 +19,18 @@ extern const char software;
 //##################################################################################################################################################################
 //						loadImages - load initial images into FT800 from DSP memory
 //##################################################################################################################################################################
-void loadImages()
+void loadImages(unsigned char fault)
 {
-	Cmd_Inflate(RAM_OMNIPUMP);
-	WriteCmdfromflash(omniPump, sizeof(omniPump));
-	Finish();
+	unsigned char i=0, timesToRepeat=1;
+	if(fault)
+		timesToRepeat=2;																				// For some reason when recovering from display fault this image needs loaded twice
+
+	for(i=0;i<timesToRepeat;i++)
+	{
+		Cmd_Inflate(RAM_OMNIPUMP);
+		WriteCmdfromflash(omniPump, sizeof(omniPump));
+		Finish();
+	}
 
 	Cmd_Inflate(RAM_HOURGLASS);
 	WriteCmdfromflash(hourGlass, sizeof(hourGlass));
@@ -180,7 +187,7 @@ void dispEngScreens(void)
 		potVal = pot_val;
 		phaseCmd = EPwm3Regs.CMPA.half.CMPA;
 		pumpSpeed = pumpRPM;
-		if(AGC_CMD_ePWM==AGC_HIGH)																		// Only update the variables below when AGC is at AGC_HIGH
+		if(AGC_CMD_ePWM==AGC_HIGH&&!sys_fail)															// Only update the variables below when AGC is at AGC_HIGH
 		{
 			volts = volts_val;
 			current = current_val;
@@ -191,7 +198,8 @@ void dispEngScreens(void)
 			agcError = agc_error_val;
 		}
 		sysFail = sys_fail;
-		freq=frequency;
+		if(!sys_fail)
+			freq=frequency;
 		handID = handpieceID;
 		dispTimer=0;
 	}

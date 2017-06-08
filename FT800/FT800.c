@@ -26,6 +26,9 @@
 uint8_t  GInit=0,TrnsFlag=0;																			//Global flag to indicate that initialization is done
 int32_t  GError = FT_OK;																				//Global error flag
 uint8_t  DispGpioPin = FT_GPIO7, AudioGpioPin = FT_GPIO1;												//default FT_GC pin assignments for diaplay and audio control
+unsigned long rxLimit;
+extern unsigned long getTickTime(void);
+extern unsigned char loadingImages;
 
 int32_t CmdFifoWp=0,FreeSpace = FT_CMDFIFO_SIZE - 4;													//command fifo write pointer
 unsigned int vsync0, vsync1, voffset, vcycle, hsync0, hsync1, hoffset, hcycle, hsize ,vsize, pclkpol, swizzle, pclk;
@@ -69,7 +72,7 @@ typedef struct FT_Fonts
  * Side Effects:    None
  * Overview:        Initializes the display
  ***********************************************************************************************************************************************************************/
-FT_Status Init(uint8_t ResType, uint8_t rotation)
+FT_Status Init(uint8_t rotation)
 {
 #ifndef RELEASE
 	unsigned long chipid, regid;
@@ -93,7 +96,7 @@ FT_Status Init(uint8_t ResType, uint8_t rotation)
 #ifndef RELEASE
 	Reset();																							// Bootup of graphics controller
 #endif
-	DisplayConfigExternalClock(ResType);																// Set the display configurations followed by external clock set, spi clock change wrt FT800
+	DisplayConfigExternalClock();																// Set the display configurations followed by external clock set, spi clock change wrt FT800
 #ifndef RELEASE
 	DELAY_US(20);
 
@@ -116,11 +119,11 @@ FT_Status Init(uint8_t ResType, uint8_t rotation)
 		else
 			ft800ID=1;
 		if(ft800IDCounter>=5)
-			while(1);
+			return FT_ERROR;
 	}
 
-	wr8(REG_ROTATE,rotation);																			// Rotate display 0
 #endif
+	wr8(REG_ROTATE,rotation);																			// Rotate display 0
 	SetDisplayEnablePin(FT_GPIO7);
 	Finish();
 	BacklightOn();
@@ -143,19 +146,23 @@ void wr8(unsigned long ftAddress, unsigned char ftData8)
 	// Initialize the data to send.
 	CS_LOW;																								// Set CS# low
 	SDATA = ((ftAddress>>16) | MEM_WRITE)<<SPI_SHIFT;													// Send data (MEM_WRITE plus high data address
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ftAddress>>8)<<SPI_SHIFT;																	// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ftAddress<<SPI_SHIFT;																		// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ftData8<<SPI_SHIFT;																			// Send data byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 	CS_HIGH;																							// Set CS# high
 }
@@ -166,23 +173,28 @@ void wr16(unsigned long ftAddress, unsigned int data)
 	// Initialize the data to send.
 	CS_LOW;																								// Set CS# low
 	SDATA = ((ftAddress>>16) | MEM_WRITE)<<SPI_SHIFT;													// Send Memory write plus high address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ftAddress>>8)<<SPI_SHIFT;																	// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ftAddress<<SPI_SHIFT;																		// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = data<<SPI_SHIFT;																			// Send data low byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (data>>8)<<SPI_SHIFT;																		// Send data high byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 	CS_HIGH;																							// Set CS# high
 }
@@ -193,31 +205,38 @@ void wr32(unsigned long ftAddress, unsigned long ftData32)
 	// Initialize the data to send.
 	CS_LOW;																								// Set CS# low
 	SDATA = ((ftAddress>>16) | MEM_WRITE)<<SPI_SHIFT;													// Send Memory write plus high address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ftAddress>>8)<<SPI_SHIFT;																	// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ftAddress<<SPI_SHIFT;																		// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ftData32<<SPI_SHIFT;																		// Send data low byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ftData32>>8)<<SPI_SHIFT;
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ftData32>>16)<<SPI_SHIFT;
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ftData32>>24)<<SPI_SHIFT;																	// Send data high byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	CS_HIGH;																							// Set CS# high
@@ -238,27 +257,33 @@ unsigned int rd16(unsigned long ftAddress)
 	unsigned int ftData16;
 	CS_LOW;																								// Set CS# low
 	SDATA = ((char)(ftAddress >> 16) | MEM_READ)<<SPI_SHIFT; 											// Send Memory Write plus high address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ((char)(ftAddress >> 8))<<SPI_SHIFT;														// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ((char)(ftAddress))<<SPI_SHIFT;																// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ZERO);																						// Send dummy byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ZERO);																						// Send dummy byte to initiate Receive
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ftData16 = RDATA;																					// Read low byte
 
 	SDATA = (ZERO);																						// Send dummy byte to initiate Receive
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ftData16 = (RDATA << 8) | ftData16; 																// Read high byte
 	CS_HIGH;																							// Set CS# High
 	return ftData16;																					// Return integer read
@@ -270,35 +295,43 @@ unsigned long rd32(unsigned long ftAddress)
 	unsigned long ftData32;
 	CS_LOW;																								// Set CS# low
 	SDATA = ((char)(ftAddress >> 16) | MEM_READ)<<SPI_SHIFT; 											// Send Memory Write plus high address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ((char)(ftAddress >> 8))<<SPI_SHIFT;														// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ((char)(ftAddress))<<SPI_SHIFT;																// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ZERO);																						// Send dummy byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ZERO);																						// Send dummy byte to initiate Receive
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ftData32 = RDATA;																					// Read low byte
 
 	SDATA = (ZERO);																						// Send dummy byte to initiate Receive
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ftData32 = (RDATA << 8) | ftData32;
 
 	SDATA = (ZERO);																						// Send dummy byte to initiate Receive
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ftData32 = ((unsigned long)RDATA << 16) | ftData32;
 
 	SDATA = (ZERO);																						// Send dummy byte to initiate Receive
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ftData32 = ((unsigned long)RDATA << 24) | ftData32; 												// Read high byte
 	CS_HIGH;																							// Set CS# high
 	return ftData32;																					// Return long read
@@ -330,7 +363,8 @@ unsigned int min(unsigned int a, unsigned int b)
 void Transfer(uint8_t Value8)
 {
 	SDATA = Value8<<SPI_SHIFT;																			// Send command
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;
 }
 
@@ -346,19 +380,23 @@ void Transfer(uint8_t Value8)
 void Transfer32(unsigned long Value32)
 {
 	SDATA = Value32<<SPI_SHIFT;																			// Send data low byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (Value32>>8)<<SPI_SHIFT;
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (Value32>>16)<<SPI_SHIFT;
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (Value32>>24)<<SPI_SHIFT;																	// Send data high byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 }
 
@@ -375,15 +413,18 @@ void StartWrite(unsigned long Addr)
 {
 	CS_LOW;
 	SDATA = ((Addr>>16) | MEM_WRITE)<<SPI_SHIFT;														// Send Memory write plus high address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (Addr>>8)<<SPI_SHIFT;																		// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = Addr<<SPI_SHIFT;																			// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;
 }
 
@@ -400,7 +441,8 @@ void Write(unsigned long Addr, uint8_t Value8)
 {
 	StartWrite(Addr);
 	SDATA = Value8<<SPI_SHIFT;																			// Send data byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;
 	CS_HIGH;
 }
@@ -576,11 +618,11 @@ void Reset(void)
 void PDN_Cycle(void)
 {
 	TURN_ON_DISP;
-	DELAY_US(6000);
+	DELAY_US(20000);
 	TURN_OFF_DISP;
-	DELAY_US(6000);
+	DELAY_US(20000);
 	TURN_ON_DISP;
-	DELAY_US(6000);
+	DELAY_US(20000);
 }
 
 
@@ -599,7 +641,8 @@ void Write_withSize(uint32_t Addr, uint8_t *Src, uint32_t NBytes)
 	for(i=0;i<NBytes;i++)
 	{
 		SDATA = *Src++<<SPI_SHIFT;																		// Send data byte
-		while(SPI_NOT_RECEIVED) { }																		// Wait for data to be received
+		rxLimit=getTickTime();
+		while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 		RDATA;
 	}
 	CS_HIGH;
@@ -642,124 +685,42 @@ void ActiveInternalClock(void)
  * Side Effects:    None
  * Overview:        Sets the display parameters and sets it to use external clock
  ***********************************************************************************************************************************************************************/
-void DisplayConfigExternalClock(uint8_t ResType)
+void DisplayConfigExternalClock()
 {
-	if(ResType == FT_DISPLAY_QVGA_320x240)
+	vsync0 	=	FT_DISPLAY_VSYNC0_WQVGA;
+	vsync1 	=	FT_DISPLAY_VSYNC1_WQVGA;
+	voffset	=	FT_DISPLAY_VOFFSET_WQVGA;
+	vcycle 	=	FT_DISPLAY_VCYCLE_WQVGA;
+	hsync0 	=	FT_DISPLAY_HSYNC0_WQVGA;
+	hsync1 	=	FT_DISPLAY_HSYNC1_WQVGA;
+	hoffset	=	FT_DISPLAY_HOFFSET_WQVGA;
+	hcycle 	=	FT_DISPLAY_HCYCLE_WQVGA;
+	hsize  	=	FT_DISPLAY_HSIZE_WQVGA;
+	vsize  	=	FT_DISPLAY_VSIZE_WQVGA;
+	pclkpol	=	FT_DISPLAY_PCLKPOL_WQVGA;
+	swizzle	=	FT_DISPLAY_SWIZZLE_WQVGA;
+	pclk   	=	FT_DISPLAY_PCLK_WQVGA;
+
+	if(loadingImages)
 	{
-		vsync0 	=	FT_DISPLAY_VSYNC0_QVGA;
-		vsync1 	=	FT_DISPLAY_VSYNC1_QVGA;
-		voffset	=	FT_DISPLAY_VOFFSET_QVGA;
-		vcycle 	=	FT_DISPLAY_VCYCLE_QVGA;
-		hsync0 	=	FT_DISPLAY_HSYNC0_QVGA;
-		hsync1 	=	FT_DISPLAY_HSYNC1_QVGA;
-		hoffset	=	FT_DISPLAY_HOFFSET_QVGA;
-		hcycle 	=	FT_DISPLAY_HCYCLE_QVGA;
-		hsize  	=	FT_DISPLAY_HSIZE_QVGA;
-		vsize  	=	FT_DISPLAY_VSIZE_QVGA;
-		pclkpol	=	FT_DISPLAY_PCLKPOL_QVGA;
-		swizzle	=	FT_DISPLAY_SWIZZLE_QVGA;
-		pclk   	=	FT_DISPLAY_PCLK_QVGA;
-
-	}
-	else if(ResType == FT_DISPLAY_WQVGA_480x272)
-	{
-		vsync0 	=	FT_DISPLAY_VSYNC0_WQVGA;
-		vsync1 	=	FT_DISPLAY_VSYNC1_WQVGA;
-		voffset	=	FT_DISPLAY_VOFFSET_WQVGA;
-		vcycle 	=	FT_DISPLAY_VCYCLE_WQVGA;
-		hsync0 	=	FT_DISPLAY_HSYNC0_WQVGA;
-		hsync1 	=	FT_DISPLAY_HSYNC1_WQVGA;
-		hoffset	=	FT_DISPLAY_HOFFSET_WQVGA;
-		hcycle 	=	FT_DISPLAY_HCYCLE_WQVGA;
-		hsize  	=	FT_DISPLAY_HSIZE_WQVGA;
-		vsize  	=	FT_DISPLAY_VSIZE_WQVGA;
-		pclkpol	=	FT_DISPLAY_PCLKPOL_WQVGA;
-		swizzle	=	FT_DISPLAY_SWIZZLE_WQVGA;
-		pclk   	=	FT_DISPLAY_PCLK_WQVGA;
-
-	}
-	else if(ResType  == FT_DISPLAY_RIVERDI_320x240)
-	{
-		vsync0 	=	FT_DISPLAY_RIVERDI_VSYNC0;
-		vsync1 	=	FT_DISPLAY_RIVERDI_VSYNC1;
-		voffset	=	FT_DISPLAY_RIVERDI_VOFFSET;
-		vcycle 	=	FT_DISPLAY_RIVERDI_VCYCLE;
-		hsync0 	=	FT_DISPLAY_RIVERDI_HSYNC0;
-		hsync1 	=	FT_DISPLAY_RIVERDI_HSYNC1;
-		hoffset	=	FT_DISPLAY_RIVERDI_HOFFSET;
-		hcycle 	=	FT_DISPLAY_RIVERDI_HCYCLE;
-		hsize  	=	FT_DISPLAY_RIVERDI_HSIZE;
-		vsize  	=	FT_DISPLAY_RIVERDI_VSIZE;
-		pclkpol	=	FT_DISPLAY_RIVERDI_PCLKPOL;
-		swizzle	=	FT_DISPLAY_RIVERDI_SWIZZLE;
-		pclk   	=	FT_DISPLAY_RIVERDI_PCLK;
-
-	}
-	else if(ResType  == FT_DISPLAY_KYOCERA)
-	{
-		EALLOW;
-		GpioCtrlRegs.GPAMUX2.bit.GPIO19 = 0;      														//Display CS Pin
-	    GpioCtrlRegs.GPAPUD.bit.GPIO19 = 0;     															//Enable pull-up on GPIO9 (DISPLAY_CS)
-	    GpioDataRegs.GPASET.bit.GPIO19 = 1;     															//Set display to not selected to start
-	    GpioCtrlRegs.GPADIR.bit.GPIO19 = 1;     															//set GPIO as output, DISPLAY CS
-	    EDIS;
-
-		vsync0 	=	FT_DISPLAY_KYOCERA_VSYNC0;
-		vsync1 	=	FT_DISPLAY_KYOCERA_VSYNC1;
-		voffset	=	FT_DISPLAY_KYOCERA_VOFFSET;
-		vcycle 	=	FT_DISPLAY_KYOCERA_VCYCLE;
-		hsync0 	=	FT_DISPLAY_KYOCERA_HSYNC0;
-		hsync1 	=	FT_DISPLAY_KYOCERA_HSYNC1;
-		hoffset	=	FT_DISPLAY_KYOCERA_HOFFSET;
-		hcycle 	=	FT_DISPLAY_KYOCERA_HCYCLE;
-		hsize  	=	FT_DISPLAY_KYOCERA_HSIZE;
-		vsize  	=	FT_DISPLAY_KYOCERA_VSIZE;
-		pclkpol	=	FT_DISPLAY_KYOCERA_PCLKPOL;
-		swizzle	=	FT_DISPLAY_KYOCERA_SWIZZLE;
-		pclk   	=	FT_DISPLAY_KYOCERA_PCLK;
-
-	}
-	else
-	{
-		vsync0 	=	FT_DISPLAY_VSYNC0;
-		vsync1 	=	FT_DISPLAY_VSYNC1;
-		voffset	=	FT_DISPLAY_VOFFSET;
-		vcycle 	=	FT_DISPLAY_VCYCLE;
-		hsync0 	=	FT_DISPLAY_HSYNC0;
-		hsync1 	=	FT_DISPLAY_HSYNC1;
-		hoffset	=	FT_DISPLAY_HOFFSET;
-		hcycle 	=	FT_DISPLAY_HCYCLE;
-		hsize  	=	FT_DISPLAY_HSIZE;
-		vsize  	=	FT_DISPLAY_VSIZE;
-		pclkpol	=	FT_DISPLAY_PCLKPOL;
-		swizzle	=	FT_DISPLAY_SWIZZLE;
-		pclk   	=	FT_DISPLAY_PCLK;
-
+		wr16(REG_VSYNC0, 	vsync0 );
+		wr16(REG_VSYNC1, 	vsync1 );
+		wr16(REG_VOFFSET, 	voffset);
+		wr16(REG_VCYCLE, 	vcycle );
+		wr16(REG_HSYNC0, 	hsync0 );
+		wr16(REG_HSYNC1, 	hsync1 );
+		wr16(REG_HOFFSET, 	hoffset);
+		wr16(REG_HCYCLE, 	hcycle );
+		wr16(REG_HSIZE,		hsize  );
+		wr16(REG_VSIZE, 	vsize  );
+		wr16(REG_PCLK_POL, 	pclkpol);
+		wr16(REG_SWIZZLE, 	swizzle);
+		wr16(REG_PCLK,		pclk   );																	// after configuring display parameters, configure pclk */
+		BacklightOff();
+		HostCommand(FT_CLKEXT);																			// send host command to change the clock source from internal to external
+		DisplayOn();
 	}
 
-#ifndef RELEASE
-	wr16(REG_VSYNC0, 	vsync0 );
-	wr16(REG_VSYNC1, 	vsync1 );
-	wr16(REG_VOFFSET, 	voffset);
-	wr16(REG_VCYCLE, 	vcycle );
-	wr16(REG_HSYNC0, 	hsync0 );
-	wr16(REG_HSYNC1, 	hsync1 );
-	wr16(REG_HOFFSET, 	hoffset);
-	wr16(REG_HCYCLE, 	hcycle );
-	wr16(REG_HSIZE,		hsize  );
-	wr16(REG_VSIZE, 	vsize  );
-	wr16(REG_PCLK_POL, 	pclkpol);
-	wr16(REG_SWIZZLE, 	swizzle);
-	wr16(REG_PCLK,		pclk   );																		// after configuring display parameters, configure pclk */
-
-
-
-	BacklightOff();
-	HostCommand(FT_CLKEXT);																				// send host command to change the clock source from internal to external
-	DisplayOn();
-
-
-#endif
 
 	//SpibRegs.SPIBRR =0x0005;																			// change the clock to normal operating frequency
 }
@@ -1566,19 +1527,23 @@ void StartRead(unsigned long Addr)
 {
 	CS_LOW;
 	SDATA = ((char)(Addr >> 16) | MEM_READ)<<SPI_SHIFT; 												// Send Memory Write plus high address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ((char)(Addr >> 8))<<SPI_SHIFT;																// Send middle address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = ((char)(Addr))<<SPI_SHIFT;																	// Send low address byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 
 	SDATA = (ZERO);																						// Send dummy byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	RDATA;																								// Read data to clear FIFO
 }
 
@@ -1596,7 +1561,8 @@ uint8_t Read(unsigned long Addr)
 	uint8_t ReadByte;
 	StartRead(Addr);
 	SDATA = (ZERO);																						// Read data byte
-	while(SPI_NOT_RECEIVED) { }																			// Wait for data to be received
+	rxLimit=getTickTime();
+	while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 	ReadByte = RDATA;																					// Read data byte
 	CS_HIGH;
 	return (ReadByte);
@@ -1618,7 +1584,8 @@ void Read_withSize(uint32_t Addr, uint8_t *Src, uint32_t NBytes)
 	for(i=0;i<NBytes;i++)
 	{
 		SDATA = (ZERO);																					// Read data byte
-		while(SPI_NOT_RECEIVED) { }																		// Wait for data to be received
+		rxLimit=getTickTime();
+		while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 		*Src++ = RDATA;
 	}
 	CS_HIGH;
@@ -2058,6 +2025,7 @@ FT_GEStatus Flush(void)
  ***********************************************************************************************************************************************************************/
 FT_GEStatus Finish(void)
 {
+	unsigned int errorCtr=0, zeroError=0;
 	uint16_t ReadPrt;
 
 	if(TrnsFlag)
@@ -2072,6 +2040,16 @@ FT_GEStatus Finish(void)
 		{
 			return FT_GE_ERROR;
 		}
+		if(ReadPrt == 0xFFFF)
+			errorCtr++;
+		else
+			errorCtr=0;
+		if(ReadPrt==0)
+			zeroError++;
+		else
+			zeroError=0;
+		if(errorCtr>100||zeroError>5000)
+			return FT_GE_ERROR;
 	}
 	return FT_GE_OK;
 }
@@ -2135,7 +2113,8 @@ void Writefromflash(unsigned long Addr, const unsigned char *Src, uint32_t NByte
 	for(i=0;i<NBytes;i++)
 	{
 		SDATA = (pgm_read_byte_near(Src))<<SPI_SHIFT;													// Send byte
-		while(SPI_NOT_RECEIVED) { }																		// Wait for data to be received
+		rxLimit=getTickTime();
+		while(SPI_NOT_RECEIVED&&getTickTime()-rxLimit<100) {}												// Wait for data to be received
 		RDATA;
 		Src++;
 	}

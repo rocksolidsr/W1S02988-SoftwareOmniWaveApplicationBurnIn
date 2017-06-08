@@ -8,7 +8,7 @@
 #ifndef OMNIWAVE_DISPLAY_H_
 #define OMNIWAVE_DISPLAY_H_
 
-void loadImages(void);
+void loadImages(unsigned char fault);
 void runningScreen(unsigned int timeLeft, unsigned int useTime, unsigned char runningCondiditon, unsigned char systemOn, unsigned long barColor, unsigned char textColor);
 void displayReadyToPrime(void);
 void displayPriming(void);

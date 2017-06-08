@@ -9,6 +9,10 @@
 #define OMNIWAVE_MAIN_DEFINES_H_
 
 //#define DEMO_UI
+//#define NO_TIME_LIMIT
+//#define NO_BEEPER
+//#define NO_PUMP_DOOR
+#define NEW_BOARD
 
 typedef enum states
 {
@@ -28,13 +32,17 @@ typedef enum states
 	CLOSE_PUMP
 } states;
 
-#define APP_VERSION     2       //<! Define version for use in strings
+#define APP_VERSION     3       //<! Define version for use in strings
 #define NONE			0
 #define HSW				handpieceID<250
 #define PRIME_PB		!GpioDataRegs.GPBDAT.bit.GPIO40
 #define FSW				(!GpioDataRegs.GPADAT.bit.GPIO27)
 #define FSW_DETECT		(!GpioDataRegs.GPCDAT.bit.GPIO81)
+#ifdef NO_PUMP_DOOR
+#define PUMP_LID_OPEN	0
+#else
 #define PUMP_LID_OPEN	GpioDataRegs.GPCDAT.bit.GPIO71
+#endif
 #define DONT_RESET		0
 #define RESET			1
 #define OFF				0
@@ -98,8 +106,21 @@ typedef enum states
 #define SYS_ON_2_ON	GpioDataRegs.GPBSET.bit.GPIO59			= 1										// Use to turn on/open LBB127 on power board
 #define SYS_ON_2_OFF	GpioDataRegs.GPBCLEAR.bit.GPIO59	= 1										// Use to turn off/close LBB127 on power board for proper shutdown of system
 
+#ifdef NEW_BOARD
+#define BEEPER_OFF	GpioDataRegs.GPCSET.bit.GPIO69			= 1
+#ifndef NO_BEEPER
+#define BEEPER_ON	GpioDataRegs.GPCCLEAR.bit.GPIO69		= 1
+#else
 #define BEEPER_ON	GpioDataRegs.GPCSET.bit.GPIO69			= 1
+#endif
+#else
+#ifdef NO_BEEPER
+#define BEEPER_ON	GpioDataRegs.GPCCLEAR.bit.GPIO69		= 1
+#else
+#define BEEPER_ON	GpioDataRegs.GPCSET.bit.GPIO69			= 1
+#endif
 #define BEEPER_OFF	GpioDataRegs.GPCCLEAR.bit.GPIO69		= 1
+#endif
 
 //ePWM Defines
 #define R1_ePWM 		EPwm1Regs.CMPA.half.CMPA
@@ -153,6 +174,7 @@ typedef enum states
 #define STARTUP				1
 #define USE_TIME			2
 #define NULL				0
+#define AFTER_FAULT			1
 #define ERROR				1
 #define NORMAL				2
 #define UNRECERROR			3
@@ -161,5 +183,6 @@ typedef enum states
 #define STARTUP_DELAY		100
 #define NO_US_START			10000
 #define RESTART_DELAY		100
+#define RESET_ERROR			2
 
 #endif /* OMNIWAVE_MAIN_DEFINES_H_ */

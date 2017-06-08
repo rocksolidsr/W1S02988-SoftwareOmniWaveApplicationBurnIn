@@ -10,10 +10,11 @@
 //  01  | 03 09 2017 | S.R. | 1st Software release - Used W1S02988 - revision 02XA as a start
 //							  30 minutes for ultrasound, and 15 minutes of rest
 //  02 	| 05 26 2017 | S.R. | Updated based on version 02XK of W1S02915
+//	03	| 06 08 2017 | S.R. | Updated based on version 03 of W1S02915
 //################################################################################################################################################################################################
 #include "math.h"
 #include "project.h"
-const char software[40] = "W1S02988 - Rev 02";
+const char software[40] = "W1S02988 - Rev 03";
 
 //################################################################################################################################################################################################
 //						Global Variables
@@ -88,11 +89,15 @@ unsigned int 	duty=100;																				// 0=100% duty cycle
 unsigned int 	STABLE_COUNTER = 10;
 unsigned int 	START_CMD=10;
 states state=READY_TO_PRIME, previousState=sNONE;
-unsigned int runTime=1800, useTime=0, buttonState=0;
+unsigned int runTime=1800, useTime=0;
 
 //Display Global Variables
+#ifndef RELEASE
+unsigned char loadingImages=1;
+#else
+unsigned char loadingImages=0;
+#endif
 FT_GEStatus displayStatus=FT_GE_OK;
-FT_Status initStatus=FT_OK;
 extern unsigned int hsize, vsize;
 
 #ifndef DEBUG
@@ -170,13 +175,12 @@ void main(void)
 
 	CpuTimer0Regs.TCR.bit.TSS = 0;																		// Start Timer0 Interrupt
 
-	Init(FT_DISPLAY_WQVGA_480x272, FT_DISPLAY_0);
+	Init(FT_DISPLAY_0);
 	Finish();
-	SetDisplayEnablePin(FT_GPIO7);
-	Finish();
-	loadImages();
-	DisplayOn();
-	Finish();
+	loadImages(NULL);
+#ifndef RELEASE
+	loadingImages=0;
+#endif
 
 	unsigned char beepReset=0;
 	unsigned long barColor=BAR_COLOR2;
@@ -273,6 +277,27 @@ void main(void)
 		}
 	}
 #endif
+#ifdef DEBUG
+	EALLOW;
+	SysCtrlRegs.WDCR = 0x00AF;								// Reset and enable watch dog flag
+	EDIS;
+#endif
+	//Check if system was reset by watchdog
+	if(SysCtrlRegs.WDCR & 0x0080)
+	{
+		DLStart();
+		ColorARGB(WHITE);
+		Cmd_Text(hsize/2,vsize/2-40, 25, OPT_CENTER,"Unrecoverable Error");
+		Cmd_Text(hsize/2,vsize/2, 25, OPT_CENTER,"Restart Console");
+		DLEnd();
+		Finish();
+		while(1)
+		{
+			ServiceDog1();
+			ServiceDog2();
+		}
+	}
+
 	while(1)																							// Main program (keep looping)
 	{    
 		ServiceDog1();
@@ -284,15 +309,19 @@ void main(void)
 		}
 		sys_watchword|=0x00F0;																			// Watchdog identifier for main while loop
 		displayStatus=Finish();
-		if(displayStatus>FT_GE_FINISHED||initStatus>FT_OK)
+		if(displayStatus>FT_GE_FINISHED)
 		{
+			loadingImages=1;
 			DisableDog();
-			displayStatus=FT_GE_OK;
 			Reset();
-			if((initStatus=Init(FT_DISPLAY_WQVGA_480x272, FT_DISPLAY_0))==FT_OK)
-				loadImages();
+			Init(FT_DISPLAY_0);
+			displayStatus=Finish();
+			if(displayStatus==FT_GE_OK)
+			{
+				loadImages(AFTER_FAULT);
+				loadingImages=0;
+			}
 			EnableDog();
-			BacklightOn();
 		}
 		else
 		{
@@ -400,7 +429,7 @@ void main(void)
 					if(handPieceStatus())																				// Only allow system to run it transducer is connected and debounce count is less than 1000.
 					{
 						//***********************************************************Button Pressed***********************************************************************************
-						if(HSWState()&&!sys_fail&&state!=DELAY)														// Test if user is commanding US
+						if(HSWState()==ON&&!sys_fail)																	// Test if user is commanding US
 						{
 							PUMP_SPEED = RUN_SPEED;
 							HP_LIGHT_ON;
@@ -474,7 +503,7 @@ void main(void)
 						sys_fail=PUMP_OPEN;
 					if(sys_fail==NONE)																		// As long as there is no failure display remaining time and energy on
 						runningScreen(runTime,useTime,NORMAL,energyOn,barColor,tWHITE);
-					else if(sys_fail&&!handPieceStatus())
+					else if(sys_fail<=OVER_I&&!handPieceStatus()&&sys_fail!=PUMP_ERROR)
 					{
 						ultrasound_on_off(ULTRA_OFF);
 						BEEPER_OFF;
@@ -486,7 +515,7 @@ void main(void)
 						HP_LIGHT_OFF;
 						if(alertBeep(ON,DONT_RESET))														// Wait for alertBeep to finish before switching states
 						{
-							buttonState=(HandSwitch()||FSW);
+							mode=4;
 							if((!(previousState==LATCHED_PRIMING||previousState==MOMENTARY_PRIMING))||useTime)
 								previousState=state;
 							else
@@ -563,7 +592,7 @@ void main(void)
 					PUMP_SPEED = PUMP_OFF;
 					ultrasound_on_off(ULTRA_OFF);
 					runningScreen(runTime,useTime,ERROR,energyOn,barColor,tWHITE);
-					if(buttonState!=(HandSwitch()||FSW))
+					if(HSWState()==RESET_ERROR)
 					{
 						co_done=0;
 						DSP_RESET_PA_L;																	// Make sure SR latch is reset and ready to operate, incase hardware fault occurred
@@ -573,8 +602,7 @@ void main(void)
 						DSP_RESET_PA_L;
 						DELAY_US(1000);
 						alertBeep(OFF,RESET);
-						if(sys_fail==PUMP_ERROR)
-							mode=2;
+						doneBeeping(OFF,RESET,NULL,NULL);
 						if(sys_fail==PUMP_ERROR&&previousState==MOMENTARY_PRIMING)
 							state=READY_TO_PRIME;
 						else if(previousState==LATCHED_PRIMING&&remainingTime<PRIME_TIME)
@@ -582,7 +610,6 @@ void main(void)
 						else
 							state=previousState;
 						sys_fail=NONE;
-						DELAY_US(100000);																// Button debounce
 					}
 					break;
 				case UNRECOVERABLE_ERROR:																// If unrecoverable error, stay at this state infinitely
@@ -627,7 +654,11 @@ void cpu_timer0_isr()
 	#define AGC_ERROR	AdcMirror.ADCRESULT6
 	#define AGC_PWM		AdcMirror.ADCRESULT7
 	#define LEAKAGE_OUT AdcMirror.ADCRESULT8
-	#define HANDPIECE_ID	AdcMirror.ADCRESULT10
+#ifdef NEW_BOARD
+	#define HANDPIECE_ID	AdcMirror.ADCRESULT11
+#else
+#define HANDPIECE_ID	AdcMirror.ADCRESULT10
+#endif
 
 	static unsigned long int master_restart_ctr;
 	static unsigned int volts_while_off_ctr;
@@ -986,7 +1017,10 @@ void cpu_timer0_isr()
 	}
 
 	//*****************************************************************************WATCHDOG STATUS***********************************************************************
-	sys_integrity=Sys_Watchdog();																		// Check status of watchdog
+	if(!loadingImages)																					// Don't check while loading images
+		sys_integrity=Sys_Watchdog();																	// Check status of watchdog
+	else
+		sys_integrity=SYS_DOG_OK;
 	if(sys_integrity==SYS_DOG_OUT)
 	{
 		ultrasound_on_off(ULTRA_OFF);
@@ -1297,6 +1331,7 @@ unsigned int Cal_I_mot(void)
 	i_mot_valid_ctr=0;
 	while((i_mot_valid_ctr<100)&&(pot_val<0x07ff)&&(i_mot_ctr<I_MOT_CTR_MAX))							// Limit travel of pot / Limit time in loop / Exit loop after 2 instances of 0 I motional
 	{
+		ServiceDog1();																					// Service dog in this while loop as the main loop does not run and if it takes too long to calculate C0 a watchdog error could occur
 		sys_watchword=0xFFF0;
 		if(new_ad_vals)
 		{
@@ -1469,7 +1504,7 @@ void blinkLight(void)
 //################################################################################################################################################################################################
 unsigned char HSWState(void)
 {
-	unsigned char hsw_sys_on=0, buttonPressed=0;
+	unsigned char returnValue=OFF, buttonPressed=0;
 
 	if(FSW_DETECT)
 	{
@@ -1483,36 +1518,45 @@ unsigned char HSWState(void)
 	else
 		buttonPressed = HandSwitch();
 
-	if(!sys_fail)																							// Don't allow button state change while in recoverable error, allow recoverable error state to detect button
+	switch( mode )
 	{
-		switch( mode )
-		{
-			case 0:																							// Detect 1st button down
-				if (buttonPressed)
-					mode = 1;																				// First button press detected move to the next detection state (1st release)
-				break;
-			case 1:																							// Detect 1st button release
-				hsw_sys_on = 1;
-				if(!buttonPressed)
-					mode = 2;
-				break;
-			case 2:																							// Detect button down after system turned on
-				hsw_sys_on = 1;																				// Keep system on until another press
-				if(buttonPressed)
-				{
-					hsw_sys_on = 0;
-					mode = 3;
-				}
-				break;
-			case 3:																							// Detect button release after turning off
-				if(!buttonPressed)
-				{
-					mode=0;
-				}
-				break;
-		}
+		case 0:																							// Detect 1st button down
+			if (buttonPressed)
+				mode = 1;																				// First button press detected move to the next detection state (1st release)
+			break;
+		case 1:																							// Detect 1st button release
+			returnValue = ON;
+			if(!buttonPressed)
+				mode = 2;
+			break;
+		case 2:																							// Detect button down after system turned on
+			returnValue = ON;																				// Keep system on until another press
+			if(buttonPressed)
+			{
+				returnValue = OFF;
+				mode = 3;
+			}
+			break;
+		case 3:																							// Detect button release after turning off
+			if(!buttonPressed)
+			{
+				mode=0;
+			}
+			break;
+		case 4:																							// Error
+			returnValue=OFF;
+			if(buttonPressed)
+				mode=5;
+			break;
+		case 5:
+			if(!buttonPressed)
+			{
+				returnValue=RESET_ERROR;
+				mode=0;
+			}
+			break;
 	}
-	return hsw_sys_on;
+	return returnValue;
 }
 
 
