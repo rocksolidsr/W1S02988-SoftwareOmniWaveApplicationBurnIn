@@ -5,7 +5,7 @@
 <stringAttribute key="com.ti.ccstudio.debug.debugModel.ATTR_PROGRAM.Blackhawk XDS560v2-USB System Trace Emulator/C28xx" value="${build_artifact:W1S02988-SoftwareOmniWaveApplicationBurnIn}"/>
 <stringAttribute key="com.ti.ccstudio.debug.debugModel.ATTR_PROJECT.Blackhawk XDS560v2-USB System Trace Emulator/C28xx" value="W1S02988-SoftwareOmniWaveApplicationBurnIn"/>
 <stringAttribute key="com.ti.ccstudio.debug.debugModel.ATTR_TARGET_CONFIG" value="${target_config_active_default:W1S02988-SoftwareOmniWaveApplicationBurnIn}"/>
-<stringAttribute key="com.ti.ccstudio.debug.debugModel.MRU_PROGRAM.Blackhawk XDS560v2-USB System Trace Emulator/C28xx" value="Y:/ENGINEERING\Shane\Programming\DSP Programming\CCS 6.1 Workspaces\OmniWave\W1S02988-SoftwareOmniWaveApplicationBurnIn\DEBUG - FLASH\W1S02988-SoftwareOmniWaveApplicationBurnIn.out"/>
+<stringAttribute key="com.ti.ccstudio.debug.debugModel.MRU_PROGRAM.Blackhawk XDS560v2-USB System Trace Emulator/C28xx" value="Y:/ENGINEERING\Shane\Programming\DSP Programming\CCS 6.1 Workspaces\OmniWave\W1S02988-SoftwareOmniWaveApplicationBurnIn\Debug\W1S02988-SoftwareOmniWaveApplicationBurnIn.out"/>
 <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
 <listEntry value="/W1S02988-SoftwareOmniWaveApplicationBurnIn"/>
 </listAttribute>
